@@ -1,10 +1,7 @@
 //! Resolves Cursor model selections to configured provider models.
 use crate::{
     cursor::protocol::proto::agent::v1 as pb,
-    model::{
-        parse_token_count, ModelLatency, ModelSpec, ReasoningSpec, SubagentKind,
-        SubagentModelOverride,
-    },
+    model::{parse_token_count, ModelLatency, ModelSpec, ReasoningSpec},
     Error, Result,
 };
 
@@ -35,45 +32,6 @@ pub fn requested_model(request: &pb::AgentRunRequest) -> Result<ModelSpec> {
         return Err(Error::Protocol("Cursor Run does not select a model".into()));
     };
     Ok(model)
-}
-
-pub fn overrides(
-    request: &pb::AgentRunRequest,
-) -> Result<Vec<(SubagentKind, SubagentModelOverride)>> {
-    request
-        .subagent_model_overrides
-        .iter()
-        .map(|value| {
-            use pb::subagent_model_override::Selection;
-            let kind = subagent_kind(&value.subagent_type);
-            let selection = match value.selection.as_ref() {
-                Some(Selection::Model(model)) => {
-                    if model.model_id == "default" {
-                        SubagentModelOverride::Inherit
-                    } else {
-                        SubagentModelOverride::Explicit(from_requested(model, None)?)
-                    }
-                }
-                Some(Selection::Inherit(true)) => SubagentModelOverride::Inherit,
-                Some(Selection::Disabled(true)) => SubagentModelOverride::Disabled,
-                None | Some(Selection::Inherit(false) | Selection::Disabled(false)) => {
-                    return Err(Error::Protocol(format!(
-                        "Cursor subagent model override {} has no active selection",
-                        value.subagent_type
-                    )))
-                }
-            };
-            Ok((kind, selection))
-        })
-        .collect()
-}
-
-pub fn subagent_kind(value: &str) -> SubagentKind {
-    if value == "generalPurpose" {
-        SubagentKind::GeneralPurpose
-    } else {
-        SubagentKind::Named(value.into())
-    }
 }
 
 fn from_requested(

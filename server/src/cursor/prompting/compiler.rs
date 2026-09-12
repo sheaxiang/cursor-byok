@@ -2,6 +2,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    cursor::tools::availability::{unavailable_reason, SUBAGENTS_DISABLED},
     model::{ModelSpec, PromptSpec, ToolDefinition},
     Error, Result,
 };
@@ -27,35 +28,28 @@ impl PromptCompiler {
         mode: Mode,
         model: &ModelSpec,
         dynamic_tools: &[ToolDefinition],
-        suppress_subagent_progress: bool,
     ) -> Result<PromptSpec> {
-        let mut tools = self.tools(mode, suppress_subagent_progress);
+        let mut tools = self.assets.mode(mode).tools.clone();
         let mut dynamic_tools = dynamic_tools.to_vec();
+        dynamic_tools.retain(|tool| unavailable_reason(&tool.name).is_none());
         dynamic_tools.sort_by(|left, right| left.name.cmp(&right.name));
         append_dynamic_tools(&mut tools, dynamic_tools)?;
-        if !model.supports_image_generation {
-            tools.retain(|tool| tool.name != "GenerateImage");
-        }
+        tools.retain(|tool| unavailable_reason(&tool.name).is_none());
         let fake_model_name = model
             .display_name
             .as_deref()
             .unwrap_or(model.model_id.as_str());
+        let instructions = self
+            .assets
+            .mode(mode)
+            .prompt
+            .replace("{{FAKE_MODEL_NAME}}", fake_model_name);
         Ok(PromptSpec {
-            instructions: self
-                .assets
-                .mode(mode)
-                .prompt
-                .replace("{{FAKE_MODEL_NAME}}", fake_model_name),
+            instructions: format!(
+                "{instructions}\n\n<tool_execution>\n{SUBAGENTS_DISABLED}\n</tool_execution>"
+            ),
             tools,
         })
-    }
-
-    fn tools(&self, mode: Mode, suppress_subagent_progress: bool) -> Vec<ToolDefinition> {
-        let mut tools = self.assets.mode(mode).tools.clone();
-        if mode == Mode::Subagent && suppress_subagent_progress {
-            tools.retain(|tool| tool.name != "UpdateCurrentStep");
-        }
-        tools
     }
 }
 

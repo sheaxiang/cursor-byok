@@ -239,6 +239,7 @@
               "type": "array"
             }
           },
+          "required": ["plan", "overview"],
           "type": "object"
         }
       },
@@ -346,47 +347,6 @@
     {
       "type": "function",
       "function": {
-        "name": "GenerateImage",
-        "description": "Generate an image file from a text description.\n\nSTRICT INVOCATION RULES (must follow):\n- Only use this tool when the user explicitly asks for an image. Do not generate images \"just to be helpful\".\n- Do not use this tool for data heavy visualizations such as charts, plots, tables.\n\nGeneral guidelines:\n- Provide a concrete description first: subject(s), layout, style, colors, text (if any), and constraints.\n- If the user requests an aspect ratio, set `aspect_ratio` to one of \"1:1\", \"4:3\", \"3:4\", \"16:9\", or \"9:16\".\n- If the user provides reference images, include them in `reference_image_paths`.\n- Do not repeat generated images as Markdown in your response; the client displays tool-generated images automatically.\n\nExamples that should call this tool:\n- user: \"Generate an app icon for a note-taking app, minimal flat vector style.\" (explicitly requests an image asset)\n- user: \"Make a UI mockup of a settings screen with a dark mode toggle.\" (explicitly requests a UI mockup)\n- user: \"Generate an asset of a game character with a sword.\" (explicitly requests a visual asset)\n\nExamples that should not call this tool:\n- user: \"Create a plan to refactor this module.\" (planning request; respond in text or mermaid diagram)\n- user: \"Generate a chart of sales and revenue using data.csv.\" (data visualization; generate via code)\n",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "aspect_ratio": {
-              "description": "Optional aspect ratio for the generated image. Supported values are \"1:1\", \"4:3\", \"3:4\", \"16:9\", and \"9:16\".",
-              "enum": [
-                "1:1",
-                "4:3",
-                "3:4",
-                "16:9",
-                "9:16"
-              ],
-              "type": "string"
-            },
-            "description": {
-              "description": "A detailed description of the image.",
-              "type": "string"
-            },
-            "filename": {
-              "description": "Optional filename for the generated image (e.g., 'diagram.png'). Do not include a directory path - the tool automatically handles where to save and how to display the image. If not provided, a timestamped filename will be generated.",
-              "type": "string"
-            },
-            "reference_image_paths": {
-              "description": "Optional array of file paths to reference images as additional inputs.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "description"
-          ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
         "name": "GetMcpTools",
         "description": "Inspect the Cursor client's current MCP server state. Use this only when a server or tool is absent from <mcp_meta_tools>, when its descriptor has neither an inline schema nor a readable definition_path, or when you specifically need refreshed connection/authentication status. Do not call it before tools already described in <mcp_meta_tools>.\n\n1. {\"server\":\"<id>\"}: returns the server status, instructions, descriptions, and schemas.\n2. {\"server\":\"<id>\",\"toolName\":\"<name>\"}: returns one tool.\n3. {\"pattern\":\"<regex>\"}: searches server and tool names.\n4. {\"server\":\"<id>\",\"pattern\":\"<regex>\"}: searches one server.\n5. No arguments: returns the full catalog; use only as a last resort.\n\nIf an MCP call reports an authentication error, call that server's mcp_auth tool with empty arguments when available, then retry the original call only if authentication succeeds.",
         "parameters": {
@@ -412,7 +372,7 @@
       "type": "function",
       "function": {
         "name": "Glob",
-        "description": "\nTool to search for files matching a glob pattern\n\n- Works fast with codebases of any size\n- Returns matching file paths sorted by modification time\n- Use this tool when you need to find files by name patterns\n- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches that are potentially useful as a batch.\n",
+        "description": "Search for files by glob pattern on the Cursor client, including binary documents and empty files. This searches filenames rather than file contents. Results may be truncated; narrow glob_pattern or target_directory when necessary. Use independent tool calls in parallel when useful.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -505,7 +465,7 @@
       "type": "function",
       "function": {
         "name": "Read",
-        "description": "Reads a file from the local filesystem. This tool can also read image files when called with the appropriate path. Formats supported: jpeg/jpg, png, gif, webp.",
+        "description": "Reads text files and supported images from the Cursor client filesystem. Supported image formats: jpeg/jpg, png, gif, webp. This tool does not parse Excel (.xlsx/.xls) or other unsupported binary document formats. Inspect those formats with a suitable local parser through Shell or a connected document tool. An unsupported-format error does not mean the file is inaccessible to client tools.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -551,7 +511,7 @@
       "type": "function",
       "function": {
         "name": "Shell",
-        "description": "Executes a given command in a shell session with optional foreground timeout.\n\nIMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files, sleeping) - use the specialized tools for this instead.\n\nYou can monitor commands by configuring `notify_on_output`. You will be notified at the end of your turn whenever stdout/stderr output matches the regex `pattern`. Output redirected only to a file will not trigger it. Configure a 5-or-fewer-word `reason` explaining what you are watching for, and optionally configure `debounce_ms`.\n\n<sandboxing>\nBy default, your commands will run in a sandbox. The sandbox allows most writes to the workspace and reads to the rest of the filesystem. Some other syscalls are also disallowed like access to USB devices.\n\nThe sandbox includes network access for common package managers and version control providers (e.g. npm, pypi, crates.io, Maven Central, GitHub, etc.). Standard operations like package installs and fetching dependencies will work without requesting additional permissions.\n\nFor broader network access beyond the allowed domains, you may still need to request 'full_network' permissions.\n\nThe required_permissions argument is used to request additional permissions. If you know you will need a permission, request it. Requesting permissions will slow down the command execution as it will ask the user for approval. Do not hesitate to request permissions if you are certain you need them. For commands you know will need unrestricted network access, request the full_network permission rather than waiting for the command to fail and asking for it later.\n\nThe following permissions are supported:\n\n- full_network: Grants unrestricted network access. This is useful for any commands that need to contact the outside internet, outside of the allowed domains.\n- all: Disables the sandbox entirely. If all is requested the command will run outside of the sandbox.\n\nIf you think a command failed due to sandbox restrictions, run the command again with the required_permissions argument to request what you need.\n</sandboxing>",
+        "description": "Executes a command on the Cursor client machine in a shell session with optional foreground timeout.\n\nUse dedicated tools for ordinary text-file reading, writing, editing, and filename/content searches. Use Shell for terminal programs and for operations the dedicated tools cannot perform, including parsing Excel (.xlsx/.xls), documents, archives, and other binary formats with a local program or interpreter such as Python. Prefer an available local parser or connected document tool before asking the user to export or paste a file just because Read does not support its format.\n\nFor document inspection, keep commands read-only, preserve the original file, and print extracted content to stdout. In Ask and Plan modes, only read-only commands are allowed; installing dependencies or otherwise changing the system requires authorization in an appropriate mode. Prefer installed tools and libraries. Keep local documents local unless the user explicitly authorizes uploading them. All sandbox restrictions, hooks, and approval requirements still apply.\n\nYou can monitor commands by configuring `notify_on_output`. You will be notified at the end of your turn whenever stdout/stderr output matches the regex `pattern`. Output redirected only to a file will not trigger it. Configure a 5-or-fewer-word `reason` explaining what you are watching for, and optionally configure `debounce_ms`.\n\n<sandboxing>\nBy default, your commands will run in a sandbox. The sandbox allows most writes to the workspace and reads to the rest of the filesystem. Some other syscalls are also disallowed like access to USB devices.\n\nThe sandbox includes network access for common package managers and version control providers (e.g. npm, pypi, crates.io, Maven Central, GitHub, etc.). Standard operations like package installs and fetching dependencies will work without requesting additional permissions.\n\nFor broader network access beyond the allowed domains, you may still need to request 'full_network' permissions.\n\nThe required_permissions argument is used to request additional permissions. If you know you will need a permission, request it. Requesting permissions will slow down the command execution as it will ask the user for approval. Do not hesitate to request permissions if you are certain you need them. For commands you know will need unrestricted network access, request the full_network permission rather than waiting for the command to fail and asking for it later.\n\nThe following permissions are supported:\n\n- full_network: Grants unrestricted network access. This is useful for any commands that need to contact the outside internet, outside of the allowed domains.\n- all: Disables the sandbox entirely. If all is requested the command will run outside of the sandbox.\n\nIf you think a command failed due to sandbox restrictions, run the command again with the required_permissions argument to request what you need.\n</sandboxing>",
         "parameters": {
           "type": "object",
           "properties": {
@@ -675,80 +635,6 @@
     {
       "type": "function",
       "function": {
-        "name": "Task",
-        "description": "Launch a new agent to autonomously handle a clearly bounded task that is suitable for delegation.\n\nThe Task tool starts a dedicated subagent. Each subagent_type has specific capabilities and available tools. When using Task, select the agent type through subagent_type.\n\nDefault behavior\n\nHandle the user's request directly by default, preferring direct tools such as Read, Glob, Grep, Shell, and MCP. A task being broad, multi-step, requiring codebase exploration, having an uncertain answer, or theoretically parallelizable is not by itself a reason to use Task.\n\nUse Task only when at least one of the following applies:\n- The user explicitly asks to start an agent, subagent, or worker, or explicitly asks for parallel delegation.\n- There is a substantial, clearly bounded workflow that can be completed independently and delegating it would materially help the current task.\n- The task genuinely requires capabilities provided by a specialized subagent_type.\n\nIf the current agent can complete the work with one or a few direct tool calls, do not use Task. Do not hand the entire user request to a subagent and simply return its result; the current agent remains responsible for understanding the user's intent, integrating results, and producing the final response.\n\nConcurrency rules\n\n- Launch one to three subagents by default, matching the number of independent workflows that genuinely need delegation.\n- Launch multiple subagents at the same time only when the user explicitly requests parallel agents or when there are two or three independent, substantial workflows.\n- When the user does not specify a number, launch at most three subagents in a single response. If the user explicitly requests more, you may launch the requested number.\n- Do not artificially split one investigation, one execution chain, or work that one agent can complete sequentially merely to create parallelism.\n- When multiple subagents should start together, issue multiple Task calls in the same message.\n\nExamples\n\n- The user asks, \"Where is the ClientError class defined?\": use Grep or Glob directly; do not use Task.\n- The user asks to read a known file: use Read directly; do not use Task.\n- The user asks to search two or three specified files: use Read, Grep, or Glob directly; do not use Task.\n- The user asks to run a query through a database API: call the relevant MCP directly; do not use Task.\n- The user broadly asks about the repository structure: investigate with direct tools first; broad scope alone does not require delegation.\n- The user explicitly asks to \"start two agents to investigate the client and server separately\": start two clearly bounded Tasks in parallel.\n\nUsage requirements\n\n- description must be a short, specific title that users can easily recognize.\n- prompt must clearly state the work the subagent should complete, its scope, constraints, and the information it should return.\n- Subagents cannot see the user's original message or the parent's previous steps, so prompt must include the context required to complete the task without copying unrelated context.\n- A subagent's response is working material for the parent. Verify it as appropriate for the task's risk instead of accepting it unconditionally.\n- Descriptions of subagent types explain their capabilities but do not override the rule that the current agent handles work directly by default. Do not call a type proactively merely because its description says it can be used proactively.\n- If the user explicitly requests parallel subagents, follow the number requested by the user.\n\nResume and interruption\n\n- Use resume with an existing agent ID to continue that agent while preserving its context.\n- If the target agent is still running, a resume request fails unless interrupt=true.\n- Set interrupt=true only when the user explicitly asks to interrupt or change a running agent.\n- resume=\"self\" forks a new subagent from the current parent's full conversation context.\n- Without resume, each Task call starts a new agent, so prompt must be self-contained.\n\nDisplay rules\n\nIf you mention an agent or subagent in a user-facing response, link it as `[Name](id)`. Do not use generic labels such as `[agent]`, `[worker]`, or `[subagent]`. When a cloud subagent edits code, link to `[Review](bc-id#changes)`, or use `[Review +A −D](bc-id#changes)` when the exact added and deleted line counts are known, replacing A and D with the real numbers. Use `[Try Live](bc-id#desktop)` only when the agent used computer use.\n\nAvailable subagent_type values\n\n- generalPurpose: handles substantial, clearly bounded general work that has already been determined suitable for delegation. Uncertain search results alone are not enough reason to use it.\n- explore: handles clearly bounded, substantial codebase exploration that has already been determined suitable for delegation. It can find files by patterns, search keywords, or map code structure. State the scope and desired depth: quick, medium, or very thorough.\n- shell: executes commands, Git operations, and other terminal work. Use it only when that work itself forms an independently delegable workflow.\n- cursor-guide: reads Cursor product documentation and answers questions about Cursor Desktop, IDE, CLI, Cloud Agents, Bugbot, and related products.\n- ci-investigator: investigates one failing PR CI check and returns a concise root-cause summary.\n- bugbot: use only when the user explicitly requests a Bugbot-style review of local code changes. description must be exactly `Bugbot`. Unless the user explicitly asks for background execution, set run_in_background=false. Use this exact prompt format: `Full Repository Path: ...\\nDiff: <branch changes|uncommitted changes|natural language>\\nChange Description: ...\\nCustom Instructions: ...`. Default to `Diff: branch changes`. Use natural language only as a last resort when a normal diff cannot be generated. This type does not support resume; each call starts a new agent.\n- security-review: use only when the user explicitly requests a security review of local code changes. description must be exactly `Security Review`. Unless the user explicitly asks for background execution, set run_in_background=false. Use this exact prompt format: `Full Repository Path: ...\\nDiff: <branch changes|uncommitted changes>\\nCustom Instructions: ...`. Default to `Diff: branch changes`. This type does not support resume; each call starts a new agent.\n- best-of-n-runner: performs tasks in isolated Git worktrees for user-requested Best-of-N parallel attempts or isolated experiments.\n- test-subagent: use only when the type's own specific instructions clearly match the current task and the task already satisfies the delegation conditions.\n\nSubagent model\n\nChoose from the following list only when the user explicitly requests a subagent model:\n- inherit\n- claude-opus-5-thinking-high\n- composer-2.5-fast\n- cursor-grok-4.5-low\n- cursor-grok-4.6-high-fast\n- gpt-5.6-sol-medium\n\nWhen the user does not explicitly specify a model, use inherit. If the requested model is not in the list, do not substitute or guess. Skip that subagent call and tell the user that the model is unavailable and which models are available. When describing the selected model to the user, do not show the kebab-case slug unless the user already used it.\n\nBackground agents\n\nBackground agents automatically send a completion notification after the current response ends.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "cloud_base_branch": {
-              "description": "Base branch for the cloud subagent's branch to start from. Default is current branch. Uses remote version of branch; uncommitted or un-pushed branches will fail. Only specify this parameter if environment equals cloud.",
-              "type": "string"
-            },
-            "description": {
-              "description": "A short, user-friendly title for the subagent. This appears in the UI as the subagent's name. Make it concrete and distinct, consider recent titles to avoid reuse. For resumed subagents which you are prompting to work on a separate task, give an updated description based on the latest work the subagent is performing. (Do not rename if the subagent is continuing work on the same high-level task.)",
-              "type": "string"
-            },
-            "environment": {
-              "description": "Optional execution environment for the subagent. Use \"local\" (default) for normal local subagents, or \"cloud\" to run the subagent as a cloud agent (i.e. in its own separate worktree). ONLY set to cloud if the user explicitly requests a cloud subagent. DO NOT set to cloud if user does not request cloud. Cloud subagents will work on their own git branch on their own VM. After subagent completion, follow user instructions on whether to merge that branch into your own branch, check it out, or neither. If you mention an agent or subagent in your response, link it with the `[Name](id)` Don't use generic label such as `[agent]`, `[worker]`, or `[subagent]`. For cloud subagents, when the agent has edited code, link to `[Review](bc-id#changes)`, or, if you know the exact added and deleted line counts, `[Review +A −D](bc-id#changes)`, replacing A and D with those counts. Never write A or D literally. Use `[Try Live](bc-id#desktop)` only when the agent used computer use.",
-              "enum": [
-                "local",
-                "cloud"
-              ],
-              "type": "string"
-            },
-            "file_attachments": {
-              "description": "Optional array of file paths to images or videos to pass to video-review subagents. Files are read and attached to the subagent's context. Use to forward relevant media (e.g. images sent by user) to subagents.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "interrupt": {
-              "description": "If true and `resume` targets a running async agent, interrupt the current run and send this prompt immediately. Only use when the user explicitly asks to interrupt or change what the running agent is doing.",
-              "type": "boolean"
-            },
-            "model": {
-              "description": "Optional model slug for this agent. If provided, it must resolve to one of the available model slugs. If omitted, the subagent uses the same model as the parent agent. Do not pass if resume field is set (prior model will be used). Use \"inherit\" unless the user explicitly requested another listed model.",
-              "type": "string"
-            },
-            "prompt": {
-              "description": "The task for the agent to perform",
-              "type": "string"
-            },
-            "resume": {
-              "description": "Optional agent ID to resume from. If provided, sends a follow-up message to the agent after it has completed. Requests to a currently running asynchronous agent fail unless `interrupt` is true; set `interrupt` to true only when you intend to interrupt the running agent. Use \"self\" to start a new agent with your own entire conversation history as a starting point (aka 'self-fork').",
-              "type": "string"
-            },
-            "run_in_background": {
-              "description": "Run the agent in the background (returns output_file path to check later). If this is false, you will be blocked until the agent completes. If the user is currently in Multitask Mode, always set this parameter to True. When true, the background subagent will send a notification when it completes.",
-              "type": "boolean"
-            },
-            "subagent_type": {
-              "description": "Subagent type to use for this task. Must be one of: generalPurpose, explore, shell, cursor-guide, ci-investigator, bugbot, security-review, best-of-n-runner, test-subagent.",
-              "enum": [
-                "generalPurpose",
-                "explore",
-                "shell",
-                "cursor-guide",
-                "ci-investigator",
-                "bugbot",
-                "security-review",
-                "best-of-n-runner",
-                "test-subagent"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "description",
-            "prompt"
-          ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
         "name": "TodoWrite",
         "description": "Use this tool to create and manage a structured task list for your current coding session.",
         "parameters": {
@@ -796,31 +682,6 @@
             "todos",
             "merge"
           ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "UpdateCurrentStep",
-        "description": "Record a concise (6 words or less), user-friendly update of the major step or phase you are working on for the parent timeline. Update when the subtask changes. Set `final_summary` and `completed_subtitle` ONCE per response as your last action before the final response. ALWAYS use in parallel with at least one other tool. ALWAYS start the update with a descriptive verb.",
-        "parameters": {
-          "properties": {
-            "completed_subtitle": {
-              "$ref": "#/properties/current_step",
-              "description": "4-6 word, past-tense, final summary of the work you have completed. Will be used as your agent subtitle in the UI. Keep the text concise, high-level, and user-friendly. Set this field ONCE per turn, as the last thing you do before your final response, at the same time that you set the final_summary field."
-            },
-            "current_step": {
-              "description": "Major step or phase you are on. Update when the subtask changes. Keep the text concise, high-level, and user-friendly.",
-              "minLength": 1,
-              "type": "string"
-            },
-            "final_summary": {
-              "$ref": "#/properties/current_step",
-              "description": "User-facing executive summary succinctly reporting on your work / responding to the user's message; write this as a concise message speaking back to the user, not as a status tag. Typically 1-3 sentences, or a brief lead-in plus bullet points when there are multiple distinct takeaways, decisions, test results, etc. When using bullets, make them pleasant and easy to scan: 2-5 bullets when possible, one useful idea per bullet, ordered by importance to the user, concise but not cryptic, and no nested bullets unless the user requested detail. Use prose instead of bullets when there is only one main takeaway. Include the most relevant takeaways for the user, as implied by the user's original request. No unnecessary details. When answering questions by the user, include the full answer that the user is seeking. Examples of what to include: full answer(s) to user's question(s), high-level root cause while debugging, status update of completed (or in-progress) work, test results for specifically requested testing, blocking questions the user must answer before you can continue, links to newly created PRs, etc. Examples of what NOT to include (unless implicitly or explicitly requested by the user): tool calls / results, code / log / shell command excerpts, long file paths, line numbers, low-level implementation details, etc. Set this field just ONCE per turn, as the last thing you do before your final response, at the same time that you set the completed_subtitle field."
-            }
-          },
-          "type": "object"
         }
       }
     },

@@ -5,6 +5,9 @@ use crate::{cursor::protocol::proto::agent::v1 as pb, model::ToolCall, Error, Re
 
 pub fn tool_query(id: u32, call: &ToolCall) -> Result<pb::AgentServerMessage> {
     use pb::interaction_query::Query;
+    if let Some(reason) = crate::cursor::tools::availability::unavailable_reason(&call.name) {
+        return Err(Error::Protocol(reason.into()));
+    }
     let string = |name: &str| {
         call.arguments
             .get(name)
@@ -151,23 +154,6 @@ pub fn tool_query(id: u32, call: &ToolCall) -> Result<pb::AgentServerMessage> {
                 tool_call_id: call.call_id.clone(),
             })
         }
-        "generateimage" => Query::GenerateImageRequestQuery(pb::GenerateImageRequestQuery {
-            args: Some(pb::GenerateImageArgs {
-                description: string("description")?,
-                file_path: optional_string("filename"),
-                reference_image_paths: call
-                    .arguments
-                    .get("reference_image_paths")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect(),
-                aspect_ratio: optional_string("aspect_ratio"),
-            }),
-            tool_call_id: call.call_id.clone(),
-        }),
         "callmcptool"
             if optional_string("toolName").is_some_and(|tool| normalized(&tool) == "mcpauth") =>
         {
@@ -253,8 +239,7 @@ mod tests {
         else {
             panic!("expected an InteractionQuery");
         };
-        let Some(pb::interaction_query::Query::WebSearchRequestQuery(request)) = query.query
-        else {
+        let Some(pb::interaction_query::Query::WebSearchRequestQuery(request)) = query.query else {
             panic!("expected a WebSearchRequestQuery");
         };
         assert_eq!(request.args.unwrap().search_term, "lmarena leaderboard");

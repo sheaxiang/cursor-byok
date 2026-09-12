@@ -19,7 +19,6 @@ import { useMessage } from "../shared/ui/message";
 import { VirtualList } from "../shared/virtual/VirtualList";
 import { useI18n } from "../i18n/store";
 import { appStore, useAppStore } from "../shared/store/appStore";
-import { useUpdateStore } from "../shared/store/updateStore";
 import styles from "./AppLayout.module.scss";
 import { PageActionsTarget } from "./PageActions";
 
@@ -45,7 +44,6 @@ function loadStoredAdIds(key: string): Set<string> {
 
 export function AppLayout() {
   const { busy, cursorHarness } = useAppStore();
-  const { availableVersion } = useUpdateStore();
   const { locale } = useI18n();
   const message = useMessage();
   const location = useLocation();
@@ -223,7 +221,6 @@ export function AppLayout() {
               >
                 {cursorHarness.settings_applied ? t("已接管") : t("未接管")}
               </span>}
-              {item.path === "/settings" && availableVersion && <span className={styles.menuIndicatorDot} aria-hidden="true" />}
             </NavLink>
           </div>}
         </VirtualList>

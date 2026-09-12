@@ -20,7 +20,6 @@ enum Presentation {
     DynamicMcp(pb::McpToolDefinition),
     Edit(EditProjection),
     CreatePlan(CreatePlanProjection),
-    Task(TaskProjection),
 }
 
 struct EditProjection {
@@ -39,20 +38,10 @@ struct CreatePlanProjection {
     overview: String,
 }
 
-#[derive(Default)]
-struct TaskProjection {
-    fields: JsonStringFields,
-    description: String,
-    prompt: String,
-    subagent_type: String,
-    model: String,
-    resume: String,
-    environment: String,
-}
-
 impl ToolCallStream {
     pub fn new(name: &str, dynamic_mcp: Option<&pb::McpToolDefinition>) -> Self {
         let presentation = match dynamic_mcp {
+            _ if super::availability::unavailable_reason(name).is_some() => Presentation::Plain,
             Some(definition) => Presentation::DynamicMcp(definition.clone()),
             None => match normalized(name).as_str() {
                 "write" => Presentation::Edit(EditProjection::new("path", "contents")),
@@ -61,7 +50,6 @@ impl ToolCallStream {
                     Presentation::Edit(EditProjection::new("target_notebook", "new_string"))
                 }
                 "createplan" => Presentation::CreatePlan(CreatePlanProjection::default()),
-                "task" => Presentation::Task(TaskProjection::default()),
                 _ => Presentation::Plain,
             },
         };
@@ -86,45 +74,7 @@ impl ToolCallStream {
                 Ok(messages)
             }
             Presentation::CreatePlan(plan) => plan.project(call, raw_delta),
-            Presentation::Task(task) => task.project(call, raw_delta),
         }
-    }
-}
-
-impl TaskProjection {
-    fn project(&mut self, call: &ToolCall, raw_delta: &str) -> Result<Vec<pb::AgentServerMessage>> {
-        let mut description_completed = false;
-        for event in self.fields.push(raw_delta)? {
-            match event {
-                StringFieldEvent::Delta { name, text } => match name.as_str() {
-                    "description" => self.description.push_str(&text),
-                    "prompt" => self.prompt.push_str(&text),
-                    "subagent_type" => self.subagent_type.push_str(&text),
-                    "model" => self.model.push_str(&text),
-                    "resume" => self.resume.push_str(&text),
-                    "environment" => self.environment.push_str(&text),
-                    _ => {}
-                },
-                StringFieldEvent::End { name } if name == "description" => {
-                    description_completed = true
-                }
-                _ => {}
-            }
-        }
-        Ok(description_completed
-            .then(|| {
-                interaction::task_partial(
-                    call,
-                    &self.description,
-                    &self.prompt,
-                    &self.subagent_type,
-                    &self.model,
-                    &self.resume,
-                    &self.environment,
-                )
-            })
-            .into_iter()
-            .collect())
     }
 }
 
@@ -253,36 +203,38 @@ mod tests {
     }
 
     #[test]
-    fn task_description_projects_a_visible_partial_card_before_execution() {
-        let mut stream = ToolCallStream::new("Task", None);
-        let first = r#"{"description":"Review K10"#;
-        assert!(stream
-            .arguments_delta(&task_call(first), first)
-            .unwrap()
-            .is_empty());
-
-        let closing = "\",";
-        let messages = stream
-            .arguments_delta(&task_call(&format!("{first}{closing}")), closing)
-            .unwrap();
-        assert_eq!(messages.len(), 1);
-        let Some(pb::agent_server_message::Message::InteractionUpdate(update)) =
-            messages[0].message.as_ref()
-        else {
-            panic!("expected interaction update")
+    fn should_never_project_disabled_calls_as_subagent_cards() {
+        let definition = pb::McpToolDefinition {
+            name: "Task".into(),
+            ..Default::default()
         };
-        let Some(pb::interaction_update::Message::PartialToolCall(partial)) =
-            update.message.as_ref()
-        else {
-            panic!("expected partial tool call")
-        };
-        let tool_call = partial.tool_call.as_ref().expect("expected tool call");
-        assert_eq!(tool_call.started_at_ms, None);
-        let Some(pb::tool_call::Tool::TaskToolCall(task)) = tool_call.tool.as_ref() else {
-            panic!("expected Task tool call")
-        };
-        let args = task.args.as_ref().expect("expected partial Task args");
-        assert_eq!(args.description, "Review K10");
-        assert_eq!(args.prompt, "");
+        for dynamic in [None, Some(&definition)] {
+            let mut stream = ToolCallStream::new("Task", dynamic);
+            for delta in [
+                r#"{"description":"Review"#,
+                r#" protocol","prompt":"Inspect it"}"#,
+            ] {
+                let messages = stream.arguments_delta(&task_call(delta), delta).unwrap();
+                assert_eq!(messages.len(), 1);
+                let Some(pb::agent_server_message::Message::InteractionUpdate(update)) =
+                    &messages[0].message
+                else {
+                    panic!("expected tool update")
+                };
+                let Some(pb::interaction_update::Message::PartialToolCall(partial)) =
+                    &update.message
+                else {
+                    panic!("expected tool arguments")
+                };
+                assert!(!matches!(
+                    partial
+                        .tool_call
+                        .as_ref()
+                        .and_then(|call| call.tool.as_ref()),
+                    Some(pb::tool_call::Tool::TaskToolCall(_))
+                ));
+                assert_eq!(partial.args_text_delta, delta);
+            }
+        }
     }
 }

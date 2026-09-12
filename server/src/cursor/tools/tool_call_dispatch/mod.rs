@@ -48,22 +48,17 @@ pub(super) async fn start(
         return interaction::start(runtime, call).await;
     }
 
-    if context.task_disabled(call) {
-        return local::subagents_disabled(call);
-    }
-
     let normalized_call = normalize_block_until_ms(call)?;
     let call = normalized_call.as_ref().unwrap_or(call);
 
     match normalized(&call.name).as_str() {
-        "shell" | "bash" | "read" | "delete" | "grep" | "glob" | "readlints" | "task"
-        | "callmcptool" | "fetchmcpresource" | "getmcptools" => {
-            exec::start(runtime, call, context).await
-        }
+        "shell" | "bash" | "read" | "delete" | "grep" | "glob" | "readlints" | "callmcptool"
+        | "fetchmcpresource" | "getmcptools" => exec::start(runtime, call, context).await,
         "write" | "strreplace" | "editnotebook" => edit::start(runtime, call, context).await,
-        "askquestion" | "websearch" | "webfetch" | "switchmode" | "createplan"
-        | "generateimage" => interaction::start(runtime, call).await,
-        "todowrite" | "updatecurrentstep" => local::start(call, message_index),
+        "askquestion" | "websearch" | "webfetch" | "switchmode" | "createplan" => {
+            interaction::start(runtime, call).await
+        }
+        "todowrite" => local::start(call, message_index),
         "semblesearch" | "semblefindrelated" => search::start(results, call, store.cloned()),
         _ => Ok(unavailable_tool(call)),
     }

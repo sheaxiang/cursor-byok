@@ -11,7 +11,7 @@ use crate::{
         protocol::proto::agent::v1 as pb,
         services::blob_sync::BlobSynchronizer,
         services::context_sync::RequestContextSynchronizer,
-        tools::runtime::{ExecContext, SubagentModel},
+        tools::{availability::SUBAGENTS_DISABLED, runtime::ExecContext},
     },
     model::{
         CanonicalMessage, ContentPart, ConversationId, MessageContent, Origin, PreparedRun,
@@ -59,6 +59,9 @@ pub(crate) async fn prepare(
     request: &pb::AgentRunRequest,
     dependencies: PrepareDependencies<'_>,
 ) -> Result<(PreparedRun, CursorRunContext)> {
+    if request.subagent_type_name.is_some() {
+        return Err(Error::Protocol(SUBAGENTS_DISABLED.into()));
+    }
     let PrepareDependencies {
         compiler,
         store,
@@ -134,36 +137,22 @@ pub(crate) async fn prepare(
         compacting,
         background_completion,
     } = action(request)?;
-    let checkpoint_mode = if request.subagent_type_name.is_some() {
-        Mode::Subagent
-    } else {
-        mode_from_proto(mode_number)?
-    };
+    let checkpoint_mode = mode_from_proto(mode_number)?;
     let mut model = model::requested_model(request)?;
     if let Some(configured_model) = store.model(&model.model_id).await? {
         configured_model.configure(&mut model);
     }
     let dynamic = context::dynamic_mcp(request, &request_context)?;
-    let subagent_model_overrides = model::overrides(request)?;
-    let subagents_disabled = subagent_model_overrides
-        .first()
-        .is_some_and(|(_, selection)| {
-            matches!(selection, crate::model::SubagentModelOverride::Disabled)
-        });
-    let mut checkpoint_prompt = compiler.prompt_spec(
+    let checkpoint_prompt = compiler.prompt_spec(
         checkpoint_mode,
         &model,
         &dynamic
             .values()
             .map(|(_, definition)| definition.clone())
             .collect::<Vec<_>>(),
-        request.suppress_subagent_progress_update_tool == Some(true),
     )?;
-    if subagents_disabled {
-        checkpoint_prompt.tools.retain(|tool| tool.name != "Task");
-    }
     let prompt = if compacting {
-        compiler.prompt_spec(Mode::Compaction, &model, &[], false)?
+        compiler.prompt_spec(Mode::Compaction, &model, &[])?
     } else {
         checkpoint_prompt.clone()
     };
@@ -320,14 +309,7 @@ pub(crate) async fn prepare(
         };
         RunAction::Resume { pending_tool_round }
     };
-    let exec = exec_context(
-        request,
-        &request_context,
-        &conversation_id,
-        &model.model_id,
-        subagents_disabled,
-        &subagent_model_overrides,
-    );
+    let exec = exec_context(&request_context, &conversation_id);
     Ok((
         PreparedRun {
             run_id,
@@ -448,19 +430,13 @@ fn action(request: &pb::AgentRunRequest) -> Result<ActionProjection> {
                     background_completion: false,
                 });
             }
-            let mut context = action
+            let context = action
                 .prepend_user_messages
                 .iter()
                 .map(|message| message.text.trim())
                 .filter(|text| !text.is_empty())
                 .map(str::to_string)
                 .collect::<Vec<_>>();
-            context.extend(
-                user.subagent_system_reminder
-                    .iter()
-                    .filter(|text| !text.is_empty())
-                    .cloned(),
-            );
             let input_id = format!("cursor:user:{}", user.message_id);
             Ok(ActionProjection {
                 mode,
@@ -576,33 +552,11 @@ pub(super) fn mode_from_proto(mode: i32) -> Result<Mode> {
 }
 
 fn exec_context(
-    request: &pb::AgentRunRequest,
     request_context: &pb::RequestContext,
     conversation_id: &ConversationId,
-    model_id: &str,
-    subagents_disabled: bool,
-    overrides: &[(
-        crate::model::SubagentKind,
-        crate::model::SubagentModelOverride,
-    )],
 ) -> ExecContext {
-    let subagent_model = overrides.first().map(|(_, value)| match value {
-        crate::model::SubagentModelOverride::Explicit(model) => {
-            SubagentModel::Model(model.model_id.clone())
-        }
-        crate::model::SubagentModelOverride::Inherit => SubagentModel::Model(model_id.into()),
-        crate::model::SubagentModelOverride::Disabled => SubagentModel::Disabled,
-    });
     ExecContext {
         conversation_id: conversation_id.to_string(),
-        root_conversation_id: request
-            .conversation_group_id
-            .clone()
-            .unwrap_or_else(|| conversation_id.to_string()),
-        default_subagent_model: model_id.into(),
-        subagent_model,
-        allow_subagents: request.subagent_type_name.is_none() && !subagents_disabled,
-        subagents_disabled,
         terminals_folder: request_context
             .env
             .as_ref()

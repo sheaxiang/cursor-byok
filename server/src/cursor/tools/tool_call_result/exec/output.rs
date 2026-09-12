@@ -12,6 +12,7 @@ pub(super) fn output(
         Message::WriteResult(value) => write(value),
         Message::DeleteResult(value) => delete(value),
         Message::GrepResult(value) => grep(value),
+        Message::PiFindResult(value) => find(value),
         Message::DiagnosticsResult(value) => diagnostics(value, call),
         Message::McpResult(value) => mcp(value),
         Message::ReadMcpResourceExecResult(value) => read_mcp(value),
@@ -114,6 +115,21 @@ fn delete(value: &pb::DeleteResult) -> Result<(String, bool)> {
         R::FileBusy(value) => Ok((format!("file busy: {}", value.path), true)),
         R::Rejected(value) => Ok((value.reason.clone(), true)),
         R::Error(value) => Ok((value.error.clone(), true)),
+    }
+}
+
+fn find(value: &pb::PiFindExecResult) -> Result<(String, bool)> {
+    match value.result.as_ref().ok_or_else(|| missing("glob"))? {
+        pb::pi_find_exec_result::Result::Success(success) => {
+            let mut output = success.output.clone();
+            if success.result_limit_reached.is_some() || success.truncation.is_some() {
+                output.push_str(
+                    "\n[Filename results truncated; narrow glob_pattern or target_directory.]",
+                );
+            }
+            Ok((output, false))
+        }
+        pb::pi_find_exec_result::Result::Error(error) => Ok((error.error.clone(), true)),
     }
 }
 

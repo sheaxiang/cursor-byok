@@ -24,13 +24,6 @@ pub enum RunKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub enum SubagentModelOverride {
-    Explicit(ModelSpec),
-    Inherit,
-    Disabled,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum RunAction {
     Start,
     Compact,

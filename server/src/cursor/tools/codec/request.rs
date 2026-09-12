@@ -5,6 +5,7 @@ use crate::{
     cursor::{
         protocol::proto::agent::v1 as pb,
         tools::{
+            availability::unavailable_reason,
             edit::{self, EditWrite},
             runtime::{ExecContext, McpRoute},
         },
@@ -15,6 +16,9 @@ use crate::{
 
 pub fn request(id: u32, call: &ToolCall, context: &ExecContext) -> Result<pb::AgentServerMessage> {
     use pb::exec_server_message::Message;
+    if let Some(reason) = unavailable_reason(&call.name) {
+        return Err(Error::Protocol(reason.into()));
+    }
     let string = |name: &str| {
         call.arguments
             .get(name)
@@ -110,14 +114,19 @@ pub fn request(id: u32, call: &ToolCall, context: &ExecContext) -> Result<pb::Ag
             sandbox_policy: None,
             offset: int("offset"),
         }),
-        "glob" => Message::GrepArgs(pb::GrepArgs {
-            pattern: String::new(),
-            path: optional_string("target_directory"),
-            glob: optional_string("glob_pattern"),
-            output_mode: Some("files_with_matches".into()),
-            tool_call_id: call.call_id.clone(),
-            ..Default::default()
-        }),
+        "glob" => {
+            let pattern = string("glob_pattern")?;
+            let pattern = if pattern.starts_with("**/") {
+                pattern
+            } else {
+                format!("**/{pattern}")
+            };
+            Message::PiFindArgs(pb::PiFindExecArgs {
+                pattern,
+                path: optional_string("target_directory"),
+                limit: None,
+            })
+        }
         "readlints" => Message::DiagnosticsArgs(pb::DiagnosticsArgs {
             path: call
                 .arguments
@@ -128,37 +137,6 @@ pub fn request(id: u32, call: &ToolCall, context: &ExecContext) -> Result<pb::Ag
                 .unwrap_or_default()
                 .into(),
             tool_call_id: call.call_id.clone(),
-        }),
-        "task" => Message::SubagentArgs(pb::SubagentArgs {
-            tool_call_id: call.call_id.clone(),
-            subagent_type: optional_string("subagent_type").unwrap_or_default(),
-            model_id: string("model")?,
-            prompt: string("prompt")?,
-            readonly: false,
-            resume_agent_id: optional_string("resume"),
-            run_in_background: call
-                .arguments
-                .get("run_in_background")
-                .and_then(Value::as_bool),
-            continuation_config: None,
-            parent_conversation_id: Some(context.conversation_id.clone()),
-            interrupt: call.arguments.get("interrupt").and_then(Value::as_bool),
-            mode: 0,
-            fork_agent_id: None,
-            root_parent_conversation_id: Some(context.root_conversation_id.clone()),
-            selected_context: task_attachments(call),
-            direct_meta_parent_child_subagent: None,
-            environment: match optional_string("environment").as_deref() {
-                Some("cloud") => pb::SubagentExecutionEnvironment::Cloud as i32,
-                Some("local") | None => pb::SubagentExecutionEnvironment::Local as i32,
-                Some(value) => {
-                    return Err(Error::Protocol(format!(
-                        "unknown Task environment: {value}"
-                    )))
-                }
-            },
-            cloud_base_branch: optional_string("cloud_base_branch"),
-            credentials: None,
         }),
         "fetchmcpresource" => Message::ReadMcpResourceExecArgs(pb::ReadMcpResourceExecArgs {
             server: string("server")?,
@@ -177,18 +155,19 @@ pub fn request(id: u32, call: &ToolCall, context: &ExecContext) -> Result<pb::Ag
             )))
         }
     };
-    let accept_hook_additional_contexts =
-        if matches!(&message, pb::exec_server_message::Message::SubagentArgs(_)) {
-            Some(false)
-        } else {
-            Some(true)
-        };
-    Ok(server_message(
+    Ok(server_message(id, call, message, Some(true)))
+}
+
+pub(crate) fn diagnostics_request(id: u32, call: &ToolCall, path: &str) -> pb::AgentServerMessage {
+    server_message(
         id,
         call,
-        message,
-        accept_hook_additional_contexts,
-    ))
+        pb::exec_server_message::Message::DiagnosticsArgs(pb::DiagnosticsArgs {
+            path: path.into(),
+            tool_call_id: call.call_id.clone(),
+        }),
+        Some(true),
+    )
 }
 
 pub(crate) fn edit_read_request(id: u32, call: &ToolCall) -> Result<pb::AgentServerMessage> {
@@ -249,11 +228,14 @@ pub fn mcp_request(
     call: &ToolCall,
     definition: &pb::McpToolDefinition,
 ) -> Result<pb::AgentServerMessage> {
+    if let Some(reason) = unavailable_reason(&call.name) {
+        return Err(Error::Protocol(reason.into()));
+    }
     let args = call
         .arguments
         .as_object()
         .map(json_object_to_prost)
-        .unwrap_or_default();
+        .ok_or_else(|| Error::Protocol(format!("{} arguments must be a JSON object", call.name)))?;
     Ok(pb::AgentServerMessage {
         ttft_breakdown: None,
         message: Some(pb::agent_server_message::Message::ExecServerMessage(
@@ -300,12 +282,15 @@ pub(crate) fn mcp_meta_request(
             route.tool_name
         )));
     }
-    let args = call
-        .arguments
-        .get("arguments")
-        .and_then(Value::as_object)
-        .map(json_object_to_prost)
-        .unwrap_or_default();
+    let args = match call.arguments.get("arguments") {
+        None => std::collections::HashMap::new(),
+        Some(Value::Object(arguments)) => json_object_to_prost(arguments),
+        Some(_) => {
+            return Err(Error::Protocol(
+                "CallMcpTool arguments must be a JSON object".into(),
+            ))
+        }
+    };
     Ok(server_message(
         id,
         call,
@@ -467,36 +452,6 @@ fn shell_notification(call: &ToolCall) -> Result<Option<pb::ShellOutputNotificat
         debounce: object.get("debounce_ms").and_then(Value::as_f64),
         notification_limit: None,
     }))
-}
-
-fn task_attachments(call: &ToolCall) -> Option<pb::SelectedContext> {
-    let paths = call.arguments.get("file_attachments")?.as_array()?;
-    let mut context = pb::SelectedContext::default();
-    for path in paths.iter().filter_map(Value::as_str) {
-        let extension = std::path::Path::new(path)
-            .extension()
-            .and_then(std::ffi::OsStr::to_str)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if matches!(extension.as_str(), "mp4" | "mov" | "webm" | "mkv") {
-            context.selected_videos.push(pb::SelectedVideo {
-                path: path.into(),
-                filename: std::path::Path::new(path)
-                    .file_name()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .unwrap_or_default()
-                    .into(),
-                materialize_to_filesystem: true,
-                ..Default::default()
-            });
-        } else {
-            context.selected_images.push(pb::SelectedImage {
-                path: path.into(),
-                ..Default::default()
-            });
-        }
-    }
-    Some(context)
 }
 
 fn normalize(value: &str) -> String {

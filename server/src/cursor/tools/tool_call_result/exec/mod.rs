@@ -29,6 +29,13 @@ pub(crate) fn from_exec(
     }
     let wire_result = gated_shell.as_ref().unwrap_or(wire_result);
     if let Message::McpStateExecResult(result) = wire_result {
+        if crate::cursor::tools::tool_call_dispatch::normalized(&pending.call.name) != "getmcptools"
+        {
+            return Err(Error::Protocol(format!(
+                "unexpected Exec result for tool {}",
+                pending.call.name
+            )));
+        }
         return mcp_state::complete(pending, result);
     }
     let call = &pending.call;
@@ -54,8 +61,8 @@ pub(crate) fn from_exec(
         (Some(Tool::GrepToolCall(tool)), Message::GrepResult(result)) => {
             tool.result = Some(result.clone());
         }
-        (Some(Tool::GlobToolCall(tool)), Message::GrepResult(result)) => {
-            tool.result = Some(render::glob(result)?);
+        (Some(Tool::GlobToolCall(tool)), Message::PiFindResult(result)) => {
+            tool.result = Some(render::glob(result, call)?);
         }
         (Some(Tool::ReadToolCall(tool)), Message::ReadResult(result))
         | (Some(Tool::ReadToolCall(tool)), Message::RedactedReadResult(result)) => {

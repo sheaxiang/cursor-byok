@@ -20,13 +20,13 @@ pub(super) async fn start(
             let id = runtime.reserve_exec(call, context).await?;
             codec::mcp_state_request(id, call)
         }
+        "readlints" => {
+            return crate::cursor::tools::diagnostics::start(runtime, call, context).await
+        }
         "callmcptool" => {
             let server = required(call, "server")?;
             let tool = required(call, "toolName")?;
-            let Some(route) = context
-                .mcp_routes
-                .get(&(server.to_string(), tool.to_string()))
-            else {
+            let Some(route) = runtime.mcp_route(server, tool, context).await else {
                 return Ok(ToolStart {
                     messages: Vec::new(),
                     completion: Some(result::mcp_failure(
@@ -36,17 +36,33 @@ pub(super) async fn start(
                 });
             };
             let id = runtime.reserve_exec(call, context).await?;
-            codec::mcp_meta_request(id, call, server, route)?
+            validated_request(
+                runtime,
+                id,
+                codec::mcp_meta_request(id, call, server, &route),
+            )
+            .await?
         }
         _ => {
             let id = runtime.reserve_exec(call, context).await?;
-            codec::request(id, call, context)?
+            validated_request(runtime, id, codec::request(id, call, context)).await?
         }
     };
     Ok(ToolStart {
         messages: vec![message],
         completion: None,
     })
+}
+
+async fn validated_request(
+    runtime: &CursorToolRuntime,
+    id: u32,
+    request: Result<pb::AgentServerMessage>,
+) -> Result<pb::AgentServerMessage> {
+    if request.is_err() {
+        runtime.discard_exec(id).await;
+    }
+    request
 }
 
 fn required<'a>(call: &'a ToolCall, name: &str) -> Result<&'a str> {
@@ -66,8 +82,9 @@ pub(super) async fn start_dynamic(
     let id = runtime
         .reserve_dynamic_mcp(call, context, definition)
         .await?;
+    let message = validated_request(runtime, id, codec::mcp_request(id, call, definition)).await?;
     Ok(ToolStart {
-        messages: vec![codec::mcp_request(id, call, definition)?],
+        messages: vec![message],
         completion: None,
     })
 }

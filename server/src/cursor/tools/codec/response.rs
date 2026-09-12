@@ -50,8 +50,20 @@ pub async fn client_event(
     };
     let pb::exec_client_message::Message::ShellStream(stream) = wire_result else {
         let entry = take(message.id, pending).await?;
+        if super::super::tool_call_dispatch::normalized(&entry.call.name) == "getmcptools" {
+            if let pb::exec_client_message::Message::McpStateExecResult(result) = wire_result {
+                if let Some(pb::mcp_state_exec_result::Result::Success(state)) = &result.result {
+                    pending
+                        .refresh_mcp_routes(&entry.call, &entry.context, state)
+                        .await;
+                }
+            }
+        }
         return match entry.stage {
             ExecStage::EditRead => advance_edit(entry, wire_result, pending).await,
+            ExecStage::Diagnostics(_) => {
+                super::super::diagnostics::advance(entry, wire_result, pending).await
+            }
             ExecStage::Direct | ExecStage::DynamicMcp(_) | ExecStage::EditWrite(_) => {
                 completed(entry, wire_result.clone())
             }

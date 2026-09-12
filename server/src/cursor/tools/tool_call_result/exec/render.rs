@@ -219,25 +219,33 @@ pub(super) fn task(
     })
 }
 
-pub(super) fn glob(result: &pb::GrepResult) -> Result<pb::GlobToolResult> {
-    use pb::{glob_tool_result::Result as Output, grep_result::Result as Input};
+pub(super) fn glob(result: &pb::PiFindExecResult, call: &ToolCall) -> Result<pb::GlobToolResult> {
+    use pb::{glob_tool_result::Result as Output, pi_find_exec_result::Result as Input};
     let result = match result.result.as_ref() {
         Some(Input::Success(success)) => {
             let files = success
-                .active_editor_result
-                .iter()
-                .chain(success.workspace_results.values())
-                .find_map(|result| match result.result.as_ref() {
-                    Some(pb::grep_union_result::Result::Files(files)) => Some(files),
-                    _ => None,
-                });
+                .output
+                .lines()
+                .filter(|line| !line.is_empty() && *line != "No files found matching pattern")
+                .map(str::to_string)
+                .collect::<Vec<_>>();
             Output::Success(pb::GlobToolSuccess {
-                pattern: success.pattern.clone(),
-                path: success.path.clone(),
-                files: files.map(|value| value.files.clone()).unwrap_or_default(),
-                total_files: files.map_or(0, |value| value.total_files),
-                client_truncated: files.is_some_and(|value| value.client_truncated),
-                ripgrep_truncated: files.is_some_and(|value| value.ripgrep_truncated),
+                pattern: call
+                    .arguments
+                    .get("glob_pattern")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                path: call
+                    .arguments
+                    .get("target_directory")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                total_files: files.len() as i32,
+                files,
+                client_truncated: success.truncation.is_some(),
+                ripgrep_truncated: success.result_limit_reached.is_some(),
             })
         }
         Some(Input::Error(value)) => Output::Error(pb::GlobToolError {

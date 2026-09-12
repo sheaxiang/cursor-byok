@@ -271,23 +271,6 @@ pub fn compile_context(context: &pb::RequestContext, today: &str) -> String {
             skills.join("\n")
         ));
     }
-    let subagents = context
-        .custom_subagents
-        .iter()
-        .map(|agent| {
-            format!(
-                "<subagent name=\"{}\">{}</subagent>",
-                xml(&agent.name),
-                agent.description
-            )
-        })
-        .collect::<Vec<_>>();
-    if !subagents.is_empty() {
-        sections.push(format!(
-            "<subagents>\n{}\n</subagents>",
-            subagents.join("\n")
-        ));
-    }
     {
         let servers = context
             .mcp_meta_tool_options
@@ -298,7 +281,7 @@ pub fn compile_context(context: &pb::RequestContext, today: &str) -> String {
             .collect::<Vec<_>>();
         if !servers.is_empty() {
             sections.push(format!(
-                "<mcp_meta_tools>\nThe following MCP tools are available. Call a listed tool directly with CallMcpTool without calling GetMcpTools first. If a call returns an error, use it to correct the arguments or authentication and retry when appropriate.\n<mcp_meta_tool_servers>\n{}\n</mcp_meta_tool_servers>\n</mcp_meta_tools>",
+                "<mcp_meta_tools>\nThe following MCP tools are available. Use each inline input_schema or read its definition_path before calling CallMcpTool. When neither is available, use GetMcpTools to fetch the schema first. Discovery refreshes the client execution routes. If a call returns an error, use it to correct the arguments or authentication and retry when appropriate.\n<mcp_meta_tool_servers>\n{}\n</mcp_meta_tool_servers>\n</mcp_meta_tools>",
                 servers.join("\n")
             ));
         }

@@ -12,10 +12,12 @@ use crate::{
 };
 
 pub use query::tool_query;
-pub(crate) use render::{create_plan_partial, edit_content_delta, edit_path_partial, task_partial};
+pub(crate) use render::{create_plan_partial, edit_content_delta, edit_path_partial};
 pub use render::{dynamic_mcp_placeholder, render_dynamic_mcp, tool_completed};
 pub use request::{abort, mcp_request, mcp_state_request, request};
-pub(crate) use request::{edit_read_request, json_object_to_prost, mcp_meta_request};
+pub(crate) use request::{
+    diagnostics_request, edit_read_request, json_object_to_prost, mcp_meta_request,
+};
 pub use response::{client_event, stream_closed, ClientExecEvent};
 
 use render::{
@@ -24,6 +26,9 @@ use render::{
 };
 
 pub fn tool_placeholder(name: &str, call_id: &str) -> Result<pb::ToolCall> {
+    if super::availability::unavailable_reason(name).is_some() {
+        return Ok(super::compat::placeholder(name, call_id));
+    }
     match builtin_tool_placeholder(name, call_id) {
         Ok(tool) => Ok(tool),
         Err(error) if is_unsupported_tool(&error, name) => {

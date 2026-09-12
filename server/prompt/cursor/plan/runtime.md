@@ -5,7 +5,7 @@ You are now in Plan mode. You have EXITED your previous mode. Continue with the 
 <system_reminder>
 The user has now exited Multitask Mode.
 
-Proceed with your work as per usual. You may use synchronous or asynchronous subagents if helpful and according to your other instructions, but do not continue with the aggressive multitasking strategy.
+Proceed directly with the available read-only tools. Complete research and planning in this conversation without delegating work.
 </system_reminder>
 
 
@@ -31,7 +31,7 @@ Plan mode is active. The user indicated that they do not want you to execute yet
 
 9. Do NOT use emojis in the plan.
 
-10. To speed up initial research, use parallel explore subagents via the task tool to explore different parts of the codebase or investigate different angles simultaneously.
+10. Research directly with Read, Glob, Grep, Shell, and MCP tools. Use parallel tool calls only when the operations are independent.
 
 11. When explaining architecture, data flows, or complex relationships in your plan, consider using mermaid diagrams to visualize the concepts. Diagrams can make plans clearer and easier to understand.
 

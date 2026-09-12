@@ -597,8 +597,8 @@ async fn newer_run_request_on_one_bidi_stream_replaces_the_active_run() {
 }
 
 #[tokio::test]
-async fn parent_request_does_not_need_to_resolve_to_an_active_run() {
-    assert_run_starts_without_parent_dependency(
+async fn should_reject_a_child_request_even_without_a_subagent_type() {
+    assert_run_without_subagent_execution(
         "finished-parent-request",
         Some(TransportParent {
             request_id: "already-finished-parent".into(),
@@ -610,8 +610,8 @@ async fn parent_request_does_not_need_to_resolve_to_an_active_run() {
 }
 
 #[tokio::test]
-async fn subagent_type_does_not_require_parent_metadata() {
-    assert_run_starts_without_parent_dependency(
+async fn should_reject_a_subagent_type_without_parent_metadata() {
+    assert_run_without_subagent_execution(
         "parentless-subagent-request",
         None,
         Some("generalPurpose"),
@@ -619,11 +619,17 @@ async fn subagent_type_does_not_require_parent_metadata() {
     .await;
 }
 
-async fn assert_run_starts_without_parent_dependency(
+#[tokio::test]
+async fn should_allow_root_requests_when_subagents_are_disabled() {
+    assert_run_without_subagent_execution("root-request", None, None).await;
+}
+
+async fn assert_run_without_subagent_execution(
     request_id: &str,
     parent: Option<TransportParent>,
     subagent_type_name: Option<&str>,
 ) {
+    let should_reject = parent.is_some() || subagent_type_name.is_some();
     let (_directory, store) = fixtures::temp_store().await;
     let provider = fake_provider::FakeProvider::default();
     provider.push(vec![
@@ -689,6 +695,25 @@ async fn assert_run_starts_without_parent_dependency(
         }
     };
 
+    if should_reject {
+        assert!(
+            terminal_json["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("Subagents are disabled")),
+            "{terminal_json}"
+        );
+        assert!(
+            provider.requests().is_empty(),
+            "rejected child requests must never call a model"
+        );
+        let runs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM runs WHERE cursor_request_id = ?")
+            .bind(request_id)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(runs, 0);
+        return;
+    }
     assert!(terminal_json.get("error").is_none(), "{terminal_json}");
     assert_eq!(provider.requests().len(), 1);
     let row: (String, Option<String>, Option<String>) = sqlx::query_as(

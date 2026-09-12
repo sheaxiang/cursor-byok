@@ -46,13 +46,8 @@ fn call(id: &str, name: &str) -> ToolCall {
 fn exec_context() -> ExecContext {
     ExecContext {
         conversation_id: "conversation".into(),
-        root_conversation_id: "conversation".into(),
-        default_subagent_model: "model".into(),
-        subagent_model: None,
         terminals_folder: "/tmp/terminals".into(),
         admin_command_denylist: Vec::new(),
-        allow_subagents: true,
-        subagents_disabled: false,
         mcp_routes: std::collections::HashMap::new(),
     }
 }
@@ -712,23 +707,22 @@ async fn tool_success_is_not_inferred_from_debug_text() {
 }
 
 #[tokio::test]
-async fn new_task_result_exposes_the_subagent_name_and_id_to_the_model() {
+async fn should_reject_subagent_reservations_and_ignore_unrequested_child_results() {
     let pending = CursorToolRuntime::default();
-    let mut task = call("call-task", "Task");
-    task.arguments = json!({
-        "description": "Analyze game logic",
-        "prompt": "Inspect the game",
-        "run_in_background": true,
-        "subagent_type": "generalPurpose"
-    });
-    let id = pending.reserve_exec(&task, &exec_context()).await.unwrap();
+    let task = call("call-task", "Task");
+    let error = pending
+        .reserve_exec(&task, &exec_context())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Subagents are disabled"));
+    assert!(pending.running_exec_ids().await.is_empty());
     let event = codec::client_event(
         &pb::ExecClientMessage {
-            id,
+            id: 1,
             message: Some(pb::exec_client_message::Message::SubagentResult(
                 pb::SubagentResult {
                     result: Some(pb::subagent_result::Result::Success(pb::SubagentSuccess {
-                        agent_id: "child-id".into(),
+                        agent_id: "unrequested-child".into(),
                         ..Default::default()
                     })),
                 },
@@ -739,25 +733,7 @@ async fn new_task_result_exposes_the_subagent_name_and_id_to_the_model() {
     )
     .await
     .unwrap();
-    let codec::ClientExecEvent::Completed(completion) = event else {
-        panic!("expected terminal Task result")
-    };
-
-    assert_eq!(
-        completion.result().content,
-        "Subagent name: Analyze game logic\nSubagent ID: child-id"
-    );
-    let Some(pb::tool_call::Tool::TaskToolCall(tool)) = &completion.tool_call().tool else {
-        panic!("expected TaskToolCall")
-    };
-    let Some(pb::task_result::Result::Success(success)) = tool
-        .result
-        .as_ref()
-        .and_then(|result| result.result.as_ref())
-    else {
-        panic!("expected typed Task success")
-    };
-    assert_eq!(success.agent_id.as_deref(), Some("child-id"));
+    assert!(matches!(event, codec::ClientExecEvent::Pending));
 }
 
 #[tokio::test]

@@ -54,49 +54,6 @@ pub(crate) fn edit_content_delta(call: &ToolCall, content: String) -> pb::AgentS
     )))
 }
 
-pub(crate) fn task_partial(
-    call: &ToolCall,
-    description: &str,
-    prompt: &str,
-    subagent: &str,
-    model: &str,
-    resume: &str,
-    environment: &str,
-) -> pb::AgentServerMessage {
-    server_interaction(pb::interaction_update::Message::PartialToolCall(
-        pb::PartialToolCallUpdate {
-            call_id: call.call_id.clone(),
-            tool_call: Some(pb::ToolCall {
-                hook_additional_contexts: Vec::new(),
-                tool_call_id: Some(call.call_id.clone()),
-                started_at_ms: None,
-                completed_at_ms: None,
-                tool: Some(pb::tool_call::Tool::TaskToolCall(pb::TaskToolCall {
-                    args: Some(pb::TaskArgs {
-                        description: description.into(),
-                        prompt: prompt.into(),
-                        subagent_type: Some(subagent_type(subagent)),
-                        model: (!model.is_empty()).then(|| model.into()),
-                        resume: (!resume.is_empty()).then(|| resume.into()),
-                        agent_id: None,
-                        attachments: Vec::new(),
-                        mode: 0,
-                        responding_to_message_ids: Vec::new(),
-                        environment: execution_environment(
-                            (!environment.is_empty()).then_some(environment),
-                        ),
-                        machine: None,
-                    }),
-                    result: None,
-                    ..Default::default()
-                })),
-            }),
-            args_text_delta: String::new(),
-            model_call_id: call.model_call_id.clone(),
-        },
-    ))
-}
-
 pub(crate) fn create_plan_partial(
     call: &ToolCall,
     name: &str,

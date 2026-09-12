@@ -1,7 +1,7 @@
 {
   "tools": [
     "Shell", "Glob", "Grep", "Read", "TodoWrite", "ReadLints", "WebSearch",
-    "WebFetch", "AskQuestion", "CreatePlan", "Task", "FetchMcpResource",
+    "WebFetch", "AskQuestion", "CreatePlan", "GetMcpTools", "FetchMcpResource",
     "CallMcpTool", "SembleSearch", "SembleFindRelated"
   ]
 }

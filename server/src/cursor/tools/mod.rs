@@ -6,8 +6,10 @@ use std::{
 
 use tokio::sync::Mutex;
 
+pub(crate) mod availability;
 pub mod codec;
 pub(crate) mod compat;
+mod diagnostics;
 pub(crate) mod edit;
 pub(crate) mod registry;
 pub mod runtime;
@@ -190,16 +192,18 @@ impl ToolDispatcher {
         dynamic_mcp: &BTreeMap<String, pb::McpToolDefinition>,
         context: &ExecContext,
     ) -> Result<DispatchedTool> {
-        let call = context.prepare_call(call)?;
+        if let Some(reason) = availability::unavailable_reason(&call.name) {
+            return Ok(validation_failure(call, reason.into()));
+        }
         let mut messages = if publish_started {
-            vec![codec::tool_started(&call, dynamic_mcp.get(&call.name))?]
+            vec![codec::tool_started(call, dynamic_mcp.get(&call.name))?]
         } else {
             Vec::new()
         };
         let started = tool_call_dispatch::start(
             &self.runtime,
             &self.results,
-            &call,
+            call,
             message_index,
             dynamic_mcp,
             context,

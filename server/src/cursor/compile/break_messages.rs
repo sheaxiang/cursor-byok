@@ -42,19 +42,13 @@ pub(crate) async fn compile_user_message_action(
     } else {
         user.mode
     };
-    let mut action_context = action
+    let action_context = action
         .prepend_user_messages
         .iter()
         .map(|message| message.text.trim())
         .filter(|text| !text.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
-    action_context.extend(
-        user.subagent_system_reminder
-            .iter()
-            .filter(|text| !text.is_empty())
-            .cloned(),
-    );
     let empty_context = pb::RequestContext::default();
     compile(
         format!("user-message:{}", user.message_id),

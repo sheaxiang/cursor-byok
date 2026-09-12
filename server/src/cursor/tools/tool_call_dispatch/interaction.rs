@@ -16,8 +16,15 @@ use crate::cursor::tools::{
 
 pub(super) async fn start(runtime: &CursorToolRuntime, call: &ToolCall) -> Result<ToolStart> {
     let id = runtime.reserve_interaction(call).await?;
+    let message = match interaction::tool_query(id, call) {
+        Ok(message) => message,
+        Err(error) => {
+            runtime.discard_interaction(id).await;
+            return Err(error);
+        }
+    };
     Ok(ToolStart {
-        messages: vec![interaction::tool_query(id, call)?],
+        messages: vec![message],
         completion: None,
     })
 }

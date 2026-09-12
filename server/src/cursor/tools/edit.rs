@@ -45,7 +45,12 @@ pub(crate) fn after_read(
                 None => return Err("Read result has no file content".into()),
             }
         }
-        Some(pb::read_result::Result::FileNotFound(_)) if normalized(&call.name) == "write" => {
+        Some(pb::read_result::Result::FileNotFound(_))
+            if normalized(&call.name) == "write"
+                || (normalized(&call.name) == "editnotebook"
+                    && call.arguments.get("is_new_cell").and_then(Value::as_bool)
+                        == Some(true)) =>
+        {
             String::new()
         }
         Some(pb::read_result::Result::FileNotFound(_)) => {
@@ -137,8 +142,13 @@ fn replace_string(call: &ToolCall, before: &str) -> std::result::Result<String, 
 }
 
 fn edit_notebook(call: &ToolCall, before: &str) -> std::result::Result<String, String> {
-    let mut notebook: Value =
-        serde_json::from_str(before).map_err(|error| format!("invalid notebook JSON: {error}"))?;
+    let mut notebook: Value = if before.is_empty()
+        && call.arguments.get("is_new_cell").and_then(Value::as_bool) == Some(true)
+    {
+        serde_json::json!({"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 4})
+    } else {
+        serde_json::from_str(before).map_err(|error| format!("invalid notebook JSON: {error}"))?
+    };
     let cells = notebook
         .get_mut("cells")
         .and_then(Value::as_array_mut)

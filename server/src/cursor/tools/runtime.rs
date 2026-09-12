@@ -20,6 +20,7 @@ pub struct CursorToolRuntime {
     interactions: Arc<Mutex<HashMap<u32, PendingInteraction>>>,
     completed: Arc<Mutex<HashMap<u32, String>>>,
     interrupted: Arc<Mutex<HashSet<u32>>>,
+    mcp_routes: Arc<Mutex<HashMap<String, HashMap<String, McpRoute>>>>,
 }
 
 pub(crate) struct PendingExec {
@@ -36,16 +37,12 @@ pub(crate) enum ExecStage {
     DynamicMcp(pb::McpToolDefinition),
     EditRead,
     EditWrite(EditWrite),
+    Diagnostics(super::diagnostics::DiagnosticsBatch),
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ExecContext {
     pub conversation_id: String,
-    pub root_conversation_id: String,
-    pub default_subagent_model: String,
-    pub subagent_model: Option<SubagentModel>,
-    pub allow_subagents: bool,
-    pub subagents_disabled: bool,
     pub terminals_folder: String,
     pub admin_command_denylist: Vec<String>,
     pub mcp_routes: HashMap<(String, String), McpRoute>,
@@ -57,60 +54,6 @@ pub struct McpRoute {
     pub provider_identifier: String,
     pub tool_name: String,
     pub description: String,
-}
-
-#[derive(Clone, Debug)]
-pub enum SubagentModel {
-    Model(String),
-    Disabled,
-}
-
-impl ExecContext {
-    pub fn task_disabled(&self, call: &ToolCall) -> bool {
-        if !call.name.eq_ignore_ascii_case("Task") {
-            return false;
-        }
-        self.subagents_disabled || matches!(self.subagent_model, Some(SubagentModel::Disabled))
-    }
-
-    pub fn prepare_call(&self, call: &ToolCall) -> Result<ToolCall> {
-        if !call.name.eq_ignore_ascii_case("Task") {
-            return Ok(call.clone());
-        }
-        let arguments = call
-            .arguments
-            .as_object()
-            .ok_or_else(|| Error::Protocol("Task arguments must be a JSON object".into()))?;
-        let subagent_type = arguments
-            .get("subagent_type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("generalPurpose");
-        if self.task_disabled(call) {
-            return Ok(call.clone());
-        }
-        let model = match &self.subagent_model {
-            Some(SubagentModel::Model(model)) => model.clone(),
-            Some(SubagentModel::Disabled) => unreachable!("disabled Task returned above"),
-            None => arguments
-                .get("model")
-                .and_then(serde_json::Value::as_str)
-                .filter(|model| *model != "inherit")
-                .unwrap_or(&self.default_subagent_model)
-                .to_string(),
-        };
-        if model.is_empty() {
-            return Err(Error::Protocol(format!(
-                "Task subagent type {subagent_type} has no model"
-            )));
-        }
-        let mut prepared = call.clone();
-        prepared
-            .arguments
-            .as_object_mut()
-            .expect("Task arguments were validated")
-            .insert("model".into(), serde_json::Value::String(model));
-        Ok(prepared)
-    }
 }
 
 pub(crate) struct PendingInteraction {
@@ -126,11 +69,87 @@ impl CursorToolRuntime {
             interactions: Arc::new(Mutex::new(HashMap::new())),
             completed: Arc::new(Mutex::new(HashMap::new())),
             interrupted: self.interrupted.clone(),
+            mcp_routes: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub(crate) async fn mcp_route(
+        &self,
+        server: &str,
+        tool: &str,
+        context: &ExecContext,
+    ) -> Option<McpRoute> {
+        let routes = self.mcp_routes.lock().await;
+        match routes.get(server) {
+            Some(tools) => tools.get(tool).cloned(),
+            None => context
+                .mcp_routes
+                .get(&(server.into(), tool.into()))
+                .cloned(),
+        }
+    }
+
+    pub(crate) async fn refresh_mcp_routes(
+        &self,
+        call: &ToolCall,
+        context: &ExecContext,
+        state: &pb::McpStateSuccess,
+    ) {
+        let server_filter = call
+            .arguments
+            .get("server")
+            .and_then(serde_json::Value::as_str);
+        let mut routes = self.mcp_routes.lock().await;
+        if let Some(server) = server_filter {
+            routes.insert(server.into(), HashMap::new());
+        } else {
+            routes.clear();
+            for (server, _) in context.mcp_routes.keys() {
+                routes.entry(server.clone()).or_default();
+            }
+        }
+        for server in &state.servers {
+            if server_filter.is_some_and(|filter| filter != server.server_identifier) {
+                continue;
+            }
+            let tools = server
+                .tools
+                .iter()
+                .filter(|tool| {
+                    !tool.name.is_empty()
+                        && !tool.provider_identifier.is_empty()
+                        && !tool.tool_name.is_empty()
+                })
+                .filter(|tool| super::availability::unavailable_reason(&tool.name).is_none())
+                .map(|tool| {
+                    (
+                        tool.tool_name.clone(),
+                        McpRoute {
+                            name: tool.name.clone(),
+                            provider_identifier: tool.provider_identifier.clone(),
+                            tool_name: tool.tool_name.clone(),
+                            description: tool.description.clone(),
+                        },
+                    )
+                })
+                .collect();
+            routes.insert(server.server_identifier.clone(), tools);
         }
     }
 
     pub async fn reserve_exec(&self, call: &ToolCall, context: &ExecContext) -> Result<u32> {
         self.reserve_exec_stage(call, context, ExecStage::Direct, None)
+            .await
+    }
+
+    pub(crate) async fn reserve_diagnostics(
+        &self,
+        call: &ToolCall,
+        context: &ExecContext,
+        batch: super::diagnostics::DiagnosticsBatch,
+        started_at_ms: Option<u64>,
+    ) -> Result<u32> {
+        self.reserve_exec_stage(call, context, ExecStage::Diagnostics(batch), started_at_ms)
             .await
     }
 
@@ -181,6 +200,9 @@ impl CursorToolRuntime {
         stage: ExecStage,
         started_at_ms: Option<u64>,
     ) -> Result<u32> {
+        if let Some(reason) = super::availability::unavailable_reason(&call.name) {
+            return Err(Error::Protocol(reason.into()));
+        }
         let id = self.next_id()?;
         self.execs.lock().await.insert(
             id,
@@ -197,6 +219,9 @@ impl CursorToolRuntime {
     }
 
     pub async fn reserve_interaction(&self, call: &ToolCall) -> Result<u32> {
+        if let Some(reason) = super::availability::unavailable_reason(&call.name) {
+            return Err(Error::Protocol(reason.into()));
+        }
         let id = self.next_id()?;
         self.interactions.lock().await.insert(
             id,
@@ -307,17 +332,9 @@ impl CursorToolRuntime {
     pub async fn interrupt_for_message(&self) -> Vec<u32> {
         let (abort_ids, interrupted_ids) = {
             let mut entries = self.execs.lock().await;
-            let mut abort_ids = Vec::new();
-            let mut interrupted_ids = Vec::new();
-            entries.retain(|id, entry| {
-                interrupted_ids.push(*id);
-                let keep_running = entry.call.name.eq_ignore_ascii_case("Task");
-                if !keep_running {
-                    abort_ids.push(*id);
-                }
-                keep_running
-            });
-            (abort_ids, interrupted_ids)
+            let ids = entries.keys().copied().collect::<Vec<_>>();
+            entries.clear();
+            (ids.clone(), ids)
         };
         let interaction_ids = {
             let mut interactions = self.interactions.lock().await;
@@ -337,18 +354,6 @@ impl CursorToolRuntime {
         let mut ids = self.execs.lock().await.keys().copied().collect::<Vec<_>>();
         ids.sort_unstable();
         ids
-    }
-
-    pub async fn running_task_exec_id(&self, call_id: &str) -> Option<u32> {
-        self.execs
-            .lock()
-            .await
-            .iter()
-            .filter_map(|(id, entry)| {
-                (entry.call.call_id == call_id && entry.call.name.eq_ignore_ascii_case("Task"))
-                    .then_some(*id)
-            })
-            .min()
     }
 
     fn next_id(&self) -> Result<u32> {

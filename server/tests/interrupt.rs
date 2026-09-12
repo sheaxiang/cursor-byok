@@ -981,7 +981,7 @@ async fn injected_user_context_aborts_pending_tools_and_ignores_late_results() {
 }
 
 #[tokio::test]
-async fn injected_user_context_detaches_subagents_without_cancelling_them() {
+async fn should_accept_user_injection_after_rejecting_a_subagent_call() {
     let (_directory, store) = fixtures::temp_store().await;
     let provider = fake_provider::FakeProvider::default();
     provider.push(tool_response(
@@ -995,20 +995,15 @@ async fn injected_user_context_detaches_subagents_without_cancelling_them() {
         })
         .to_string(),
     ));
-    let release = provider.push_gated(text_response("continued while subagent runs"));
-    let assets = PromptAssets::load(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("prompt/cursor")
-            .as_path(),
-    )
-    .unwrap();
+    provider.push_pending();
+    provider.push(text_response("continued directly after injection"));
     let registry = TransportRegistry::new(
         store,
         Arc::new(provider.clone()),
-        PromptCompiler::new(assets),
+        PromptCompiler::new(PromptAssets::embedded().unwrap()),
     );
     let handle = registry
-        .get_or_create("detach-subagent-request")
+        .get_or_create("disabled-subagent-injection")
         .await
         .unwrap();
     let mut output = handle.subscribe();
@@ -1016,65 +1011,47 @@ async fn injected_user_context_detaches_subagents_without_cancelling_them() {
         .command(TransportCommand::Append {
             seqno: 0,
             message: Box::new(client_run_for(
-                "detach-subagent-request",
-                "detach-subagent-conversation",
+                "disabled-subagent-injection",
+                "direct-conversation",
             )),
         })
         .await
         .unwrap();
-
     let mut append_seqno = 1;
-    let exec_id = wait_for_exec(&handle, &mut output, &mut append_seqno, "Task").await;
-    handle
-        .command(TransportCommand::Append {
-            seqno: append_seqno,
-            message: Box::new(runtime_injection_for(
-                "subagent-injection",
-                "detach-subagent-request",
-            )),
-        })
-        .await
-        .unwrap();
-    append_seqno += 1;
-
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while provider.requests().len() < 2 {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "root model did not restart while subagent remained active"
+            "root model did not continue after Task rejection"
         );
         if let Ok(Some(frame)) =
             tokio::time::timeout(std::time::Duration::from_millis(20), output.recv()).await
         {
             let (_, payload) = connect::decode_frames(&frame).unwrap().pop().unwrap();
             let server = pb::AgentServerMessage::decode(payload).unwrap();
-            if let Some(pb::agent_server_message::Message::ExecServerControlMessage(control)) =
-                server.message
-            {
-                if let Some(pb::exec_server_control_message::Message::Abort(abort)) =
-                    control.message
-                {
-                    assert_ne!(abort.id, exec_id, "Task must not be aborted by injection");
-                }
-            }
+            assert!(!matches!(
+                server.message,
+                Some(pb::agent_server_message::Message::ExecServerMessage(_))
+            ));
             acknowledge_kv(&handle, &mut append_seqno, &frame).await;
         }
     }
-
     handle
         .command(TransportCommand::Append {
             seqno: append_seqno,
-            message: Box::new(subagent_success(exec_id)),
+            message: Box::new(runtime_injection_for(
+                "direct-injection",
+                "disabled-subagent-injection",
+            )),
         })
         .await
         .unwrap();
     append_seqno += 1;
-    release.notify_one();
-
     drain_successfully(&handle, &mut output, &mut append_seqno).await;
-
-    let history = serde_json::to_string(&provider.requests()[1].history).unwrap();
-    assert!(history.contains("Tool execution was interrupted by a newer user message."));
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    let history = serde_json::to_string(&requests[2].history).unwrap();
+    assert!(history.contains("Subagents are disabled"));
     assert!(history.contains("injected follow-up"));
 }
 
@@ -1419,181 +1396,65 @@ async fn unsupported_runtime_action_is_ignored_without_failing_the_active_run() 
 }
 
 #[tokio::test]
-async fn cancel_subagent_action_aborts_the_target_task_and_keeps_the_parent_running() {
+async fn should_ignore_subagent_cancellation_without_interrupting_direct_tools() {
     let (_directory, store) = fixtures::temp_store().await;
     let provider = fake_provider::FakeProvider::default();
-    provider.push(vec![
-        ModelEvent::Start {
-            model_call_id: "task-cycle".into(),
-        },
-        ModelEvent::ToolCallStart {
-            index: 0,
-            call_id: "task-call".into(),
-            name: "Task".into(),
-        },
-        ModelEvent::ToolCallArgumentsDelta {
-            index: 0,
-            delta: serde_json::json!({
-                "description": "Inspect protocol",
-                "prompt": "Inspect the protocol",
-                "subagent_type": "generalPurpose",
-                "run_in_background": false
-            })
-            .to_string(),
-        },
-        ModelEvent::ToolCallEnd { index: 0 },
-        ModelEvent::Done(FinishReason::ToolUse),
-    ]);
-    provider.push(vec![
-        ModelEvent::Start {
-            model_call_id: "continued".into(),
-        },
-        ModelEvent::TextStart,
-        ModelEvent::TextDelta("continued after subagent cancellation".into()),
-        ModelEvent::TextEnd,
-        ModelEvent::Done(FinishReason::Stop),
-    ]);
-    let assets = PromptAssets::load(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("prompt/cursor")
-            .as_path(),
-    )
-    .unwrap();
+    provider.push(tool_response("read-call", "Read", r#"{"path":"/tmp/a"}"#));
+    provider.push(text_response("continued after direct read"));
     let registry = TransportRegistry::new(
         store,
         Arc::new(provider.clone()),
-        PromptCompiler::new(assets),
+        PromptCompiler::new(PromptAssets::embedded().unwrap()),
     );
     let handle = registry
-        .get_or_create("cancel-subagent-request")
+        .get_or_create("cancel-disabled-subagent")
         .await
         .unwrap();
     let mut output = handle.subscribe();
     handle
         .command(TransportCommand::Append {
             seqno: 0,
-            message: Box::new(client_run_for(
-                "cancel-subagent-request",
-                "cancel-subagent-conversation",
-            )),
+            message: Box::new(client_run_for("cancel-disabled-subagent", "direct-tools")),
         })
         .await
         .unwrap();
-
     let mut append_seqno = 1;
-    let exec_id = loop {
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), output.recv())
+    let exec_id = wait_for_exec(&handle, &mut output, &mut append_seqno, "Read").await;
+    for message in [
+        runtime_cancel_subagent("old-task-call"),
+        read_success(exec_id),
+    ] {
+        handle
+            .command(TransportCommand::Append {
+                seqno: append_seqno,
+                message: Box::new(message),
+            })
             .await
-            .unwrap()
-            .expect("RunSSE closed before Task exec");
-        let (flags, payload) = connect::decode_frames(&frame).unwrap().pop().unwrap();
-        assert_eq!(flags & connect::END_STREAM_FLAG, 0);
-        let server = pb::AgentServerMessage::decode(payload).unwrap();
-        match server.message {
-            Some(pb::agent_server_message::Message::KvServerMessage(kv)) => {
-                handle
-                    .command(TransportCommand::Append {
-                        seqno: append_seqno,
-                        message: Box::new(kv_ack(kv.id)),
-                    })
-                    .await
-                    .unwrap();
-                append_seqno += 1;
-            }
-            Some(pb::agent_server_message::Message::ExecServerMessage(exec)) => {
-                let Some(pb::exec_server_message::Message::SubagentArgs(args)) = exec.message
-                else {
-                    continue;
-                };
-                assert_eq!(args.tool_call_id, "task-call");
-                break exec.id;
-            }
-            _ => {}
-        }
-    };
-
-    handle
-        .command(TransportCommand::Append {
-            seqno: append_seqno,
-            message: Box::new(runtime_cancel_subagent("task-call")),
-        })
-        .await
-        .unwrap();
-    append_seqno += 1;
-
-    loop {
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), output.recv())
-            .await
-            .unwrap()
-            .expect("RunSSE closed before Task abort");
-        let (flags, payload) = connect::decode_frames(&frame).unwrap().pop().unwrap();
-        assert_eq!(flags & connect::END_STREAM_FLAG, 0);
-        let server = pb::AgentServerMessage::decode(payload).unwrap();
-        match server.message {
-            Some(pb::agent_server_message::Message::ExecServerControlMessage(control)) => {
-                let Some(pb::exec_server_control_message::Message::Abort(abort)) = control.message
-                else {
-                    continue;
-                };
-                assert_eq!(abort.id, exec_id);
-                break;
-            }
-            Some(pb::agent_server_message::Message::KvServerMessage(kv)) => {
-                handle
-                    .command(TransportCommand::Append {
-                        seqno: append_seqno,
-                        message: Box::new(kv_ack(kv.id)),
-                    })
-                    .await
-                    .unwrap();
-                append_seqno += 1;
-            }
-            _ => {}
-        }
+            .unwrap();
+        append_seqno += 1;
     }
-
-    handle
-        .command(TransportCommand::Append {
-            seqno: append_seqno,
-            message: Box::new(subagent_aborted(exec_id)),
-        })
-        .await
-        .unwrap();
-    append_seqno += 1;
-
-    let mut saw_continued = false;
     loop {
         let frame = tokio::time::timeout(std::time::Duration::from_secs(5), output.recv())
             .await
             .unwrap()
-            .expect("RunSSE closed before successful EndStream");
+            .expect("RunSSE closed before completion");
         let (flags, payload) = connect::decode_frames(&frame).unwrap().pop().unwrap();
         if flags & connect::END_STREAM_FLAG != 0 {
             assert_eq!(payload.as_ref(), b"{}");
             break;
         }
         let server = pb::AgentServerMessage::decode(payload).unwrap();
-        match server.message {
-            Some(pb::agent_server_message::Message::KvServerMessage(kv)) => {
-                handle
-                    .command(TransportCommand::Append {
-                        seqno: append_seqno,
-                        message: Box::new(kv_ack(kv.id)),
-                    })
-                    .await
-                    .unwrap();
-                append_seqno += 1;
-            }
-            Some(pb::agent_server_message::Message::InteractionUpdate(update)) => {
-                if let Some(pb::interaction_update::Message::TextDelta(delta)) = update.message {
-                    saw_continued |= delta.text.contains("continued after subagent cancellation");
-                }
-            }
-            _ => {}
-        }
+        assert!(
+            !matches!(
+                server.message,
+                Some(pb::agent_server_message::Message::ExecServerControlMessage(
+                    _
+                ))
+            ),
+            "a disabled child action must not abort the root read"
+        );
+        acknowledge_kv(&handle, &mut append_seqno, &frame).await;
     }
-
-    assert!(saw_continued);
     assert_eq!(provider.requests().len(), 2);
 }
 
@@ -1704,7 +1565,6 @@ async fn wait_for_exec(
         if let Some(pb::agent_server_message::Message::ExecServerMessage(exec)) = server.message {
             let matches = match exec.message.as_ref() {
                 Some(pb::exec_server_message::Message::ReadArgs(_)) => tool == "Read",
-                Some(pb::exec_server_message::Message::SubagentArgs(_)) => tool == "Task",
                 _ => false,
             };
             if matches {
@@ -1746,25 +1606,6 @@ fn read_success(id: u32) -> pb::AgentClientMessage {
                             total_lines: 1,
                             file_size: 1,
                             output: Some(pb::read_success::Output::Content("late".into())),
-                            ..Default::default()
-                        })),
-                    },
-                )),
-                ..Default::default()
-            },
-        )),
-    }
-}
-
-fn subagent_success(id: u32) -> pb::AgentClientMessage {
-    pb::AgentClientMessage {
-        message: Some(pb::agent_client_message::Message::ExecClientMessage(
-            pb::ExecClientMessage {
-                id,
-                message: Some(pb::exec_client_message::Message::SubagentResult(
-                    pb::SubagentResult {
-                        result: Some(pb::subagent_result::Result::Success(pb::SubagentSuccess {
-                            agent_id: "detached-child".into(),
                             ..Default::default()
                         })),
                     },
@@ -1979,25 +1820,6 @@ fn runtime_cancel_subagent(tool_call_id: &str) -> pb::AgentClientMessage {
                 action: Some(pb::conversation_action::Action::CancelSubagentAction(
                     pb::CancelSubagentAction {
                         subagent_id: tool_call_id.into(),
-                    },
-                )),
-                ..Default::default()
-            },
-        )),
-    }
-}
-
-fn subagent_aborted(id: u32) -> pb::AgentClientMessage {
-    pb::AgentClientMessage {
-        message: Some(pb::agent_client_message::Message::ExecClientMessage(
-            pb::ExecClientMessage {
-                id,
-                message: Some(pb::exec_client_message::Message::SubagentResult(
-                    pb::SubagentResult {
-                        result: Some(pb::subagent_result::Result::Error(pb::SubagentError {
-                            agent_id: None,
-                            error: "Subagent was aborted by the user".into(),
-                        })),
                     },
                 )),
                 ..Default::default()

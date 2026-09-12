@@ -466,21 +466,6 @@ impl ConversationRuntime {
                                                 ));
                                             }
                                         }
-                                        Some(
-                                            pb::conversation_action::Action::CancelSubagentAction(
-                                                action,
-                                            ),
-                                        ) => {
-                                            if let Some(generation) = current.as_ref() {
-                                                if let Some(id) = generation
-                                                    .tool_runtime
-                                                    .running_task_exec_id(&action.subagent_id)
-                                                    .await
-                                                {
-                                                    let _ = handle.emit(&codec::abort(id));
-                                                }
-                                            }
-                                        }
                                         Some(action) => {
                                             tracing::warn!(
                                                 request_id = handle.request_id(),
@@ -631,21 +616,27 @@ fn spawn_run_request(
             handle.parent().map(|parent| parent.tool_call_id.clone()),
             request.conversation_state.clone(),
         );
-        let prepared = tokio::select! {
-            biased;
-            _ = generation.superseded.cancelled() => return,
-            prepared = compile::prepare(
-                handle.request_id(),
-                &request,
-                compile::PrepareDependencies {
-                    compiler: &dependencies.compiler,
-                    store: &dependencies.store,
-                    checkpoint: &checkpoint,
-                    blob_sync: &blob_sync,
-                    context_sync: &context_sync,
-                    local_rules_dir: dependencies.local_rules_dir.as_deref(),
-                },
-            ) => prepared,
+        let prepared = if handle.parent().is_some() {
+            Err(crate::Error::Protocol(
+                crate::cursor::tools::availability::SUBAGENTS_DISABLED.into(),
+            ))
+        } else {
+            tokio::select! {
+                biased;
+                _ = generation.superseded.cancelled() => return,
+                prepared = compile::prepare(
+                    handle.request_id(),
+                    &request,
+                    compile::PrepareDependencies {
+                        compiler: &dependencies.compiler,
+                        store: &dependencies.store,
+                        checkpoint: &checkpoint,
+                        blob_sync: &blob_sync,
+                        context_sync: &context_sync,
+                        local_rules_dir: dependencies.local_rules_dir.as_deref(),
+                    },
+                ) => prepared,
+            }
         };
         let (mut prepared, context) = match prepared {
             Ok(prepared) => prepared,

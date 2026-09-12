@@ -133,194 +133,155 @@ fn split_tool_pairs_reconstruct_the_original_provider_assistant_message() {
 }
 
 #[test]
-fn every_prompt_mode_loads_the_captured_tool_set() {
+fn every_prompt_mode_loads_the_supported_tool_set() {
     let assets = PromptAssets::load(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("prompt/cursor")
             .as_path(),
     )
     .unwrap();
-    assert_eq!(assets.mode(Mode::Agent).tools.len(), 21);
+    let modes = [
+        (
+            Mode::Agent,
+            vec![
+                "Shell",
+                "Grep",
+                "Delete",
+                "WebSearch",
+                "WebFetch",
+                "EditNotebook",
+                "TodoWrite",
+                "StrReplace",
+                "Write",
+                "Read",
+                "ReadLints",
+                "Glob",
+                "AskQuestion",
+                "GetMcpTools",
+                "FetchMcpResource",
+                "SwitchMode",
+                "CallMcpTool",
+                "SembleSearch",
+                "SembleFindRelated",
+            ],
+        ),
+        (
+            Mode::Ask,
+            vec![
+                "AskQuestion",
+                "CallMcpTool",
+                "Delete",
+                "FetchMcpResource",
+                "GetMcpTools",
+                "Glob",
+                "Grep",
+                "Read",
+                "ReadLints",
+                "Shell",
+                "StrReplace",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write",
+                "SembleSearch",
+                "SembleFindRelated",
+            ],
+        ),
+        (
+            Mode::Plan,
+            vec![
+                "Shell",
+                "Glob",
+                "Grep",
+                "Read",
+                "TodoWrite",
+                "ReadLints",
+                "WebSearch",
+                "WebFetch",
+                "AskQuestion",
+                "CreatePlan",
+                "GetMcpTools",
+                "FetchMcpResource",
+                "CallMcpTool",
+                "SembleSearch",
+                "SembleFindRelated",
+            ],
+        ),
+        (
+            Mode::Debug,
+            vec![
+                "AskQuestion",
+                "CallMcpTool",
+                "Delete",
+                "FetchMcpResource",
+                "GetMcpTools",
+                "Glob",
+                "Grep",
+                "Read",
+                "ReadLints",
+                "Shell",
+                "StrReplace",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write",
+                "SembleSearch",
+                "SembleFindRelated",
+            ],
+        ),
+        (
+            Mode::Multitask,
+            vec![
+                "AskQuestion",
+                "CallMcpTool",
+                "Delete",
+                "FetchMcpResource",
+                "GetMcpTools",
+                "Glob",
+                "Grep",
+                "Read",
+                "ReadLints",
+                "Shell",
+                "StrReplace",
+                "SwitchMode",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write",
+                "SembleSearch",
+                "SembleFindRelated",
+            ],
+        ),
+        (Mode::Compaction, vec![]),
+    ];
+    let embedded = PromptAssets::embedded().unwrap();
+    for (mode, expected) in &modes {
+        assert_eq!(
+            assets
+                .mode(*mode)
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            *expected
+        );
+        assert_eq!(assets.mode(*mode).tools, embedded.mode(*mode).tools);
+    }
+    let digests = modes
+        .iter()
+        .map(|(mode, _)| schema_digest(&assets.mode(*mode).tools))
+        .collect::<Vec<_>>();
     assert_eq!(
-        assets
-            .mode(Mode::Agent)
-            .tools
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "Shell",
-            "Grep",
-            "Delete",
-            "WebSearch",
-            "WebFetch",
-            "GenerateImage",
-            "EditNotebook",
-            "TodoWrite",
-            "StrReplace",
-            "Write",
-            "Read",
-            "ReadLints",
-            "Glob",
-            "AskQuestion",
-            "Task",
-            "GetMcpTools",
-            "FetchMcpResource",
-            "SwitchMode",
-            "CallMcpTool",
-            "SembleSearch",
-            "SembleFindRelated",
+        digests,
+        [
+            "247a385de993e88babe680fac6fab888bc52d5b45d41f81a38a2e8d19af00282",
+            "25bb0ffc05e1ec19c9ea486084ef918b43a8d15183d3f8511858fdee210797ad",
+            "e2d11dd5ec22eb2609e3cbc09cacdd184c039c784eaffc5da593294fc9fe1444",
+            "25bb0ffc05e1ec19c9ea486084ef918b43a8d15183d3f8511858fdee210797ad",
+            "11677af1008bfba574f86fdd29b53c9c084df9af667377e51c9d27781b513025",
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         ]
     );
-    assert_mode(
-        &assets,
-        Mode::Ask,
-        &[
-            "AskQuestion",
-            "CallMcpTool",
-            "Delete",
-            "FetchMcpResource",
-            "Glob",
-            "Grep",
-            "Read",
-            "ReadLints",
-            "Shell",
-            "StrReplace",
-            "Task",
-            "TodoWrite",
-            "WebFetch",
-            "WebSearch",
-            "Write",
-            "SembleSearch",
-            "SembleFindRelated",
-        ],
-        "98bb57a9ade7f1a572c5c5fe77a905a129d28ecfd42b8d318250f6486b09e1ec",
-    );
-    assert_mode(
-        &assets,
-        Mode::Plan,
-        &[
-            "Shell",
-            "Glob",
-            "Grep",
-            "Read",
-            "TodoWrite",
-            "ReadLints",
-            "WebSearch",
-            "WebFetch",
-            "AskQuestion",
-            "CreatePlan",
-            "Task",
-            "FetchMcpResource",
-            "CallMcpTool",
-            "SembleSearch",
-            "SembleFindRelated",
-        ],
-        "9a7e0f9e0bd8ef0af01032fa311686f72c42ec260e3057f6fae5e68f5ed36fb8",
-    );
-    assert_mode(
-        &assets,
-        Mode::Debug,
-        &[
-            "AskQuestion",
-            "CallMcpTool",
-            "Delete",
-            "FetchMcpResource",
-            "Glob",
-            "Grep",
-            "Read",
-            "ReadLints",
-            "Shell",
-            "StrReplace",
-            "Task",
-            "TodoWrite",
-            "WebFetch",
-            "WebSearch",
-            "Write",
-            "SembleSearch",
-            "SembleFindRelated",
-        ],
-        "98bb57a9ade7f1a572c5c5fe77a905a129d28ecfd42b8d318250f6486b09e1ec",
-    );
-    assert_mode(
-        &assets,
-        Mode::Multitask,
-        &[
-            "AskQuestion",
-            "CallMcpTool",
-            "Delete",
-            "FetchMcpResource",
-            "Glob",
-            "Grep",
-            "Read",
-            "ReadLints",
-            "Shell",
-            "StrReplace",
-            "SwitchMode",
-            "Task",
-            "TodoWrite",
-            "WebFetch",
-            "WebSearch",
-            "Write",
-            "GenerateImage",
-            "SembleSearch",
-            "SembleFindRelated",
-        ],
-        "976b309dd91e314d4916439ebb9da8995751d011532e39934a1da7593dc78ccb",
-    );
-    assert_mode(
-        &assets,
-        Mode::Subagent,
-        &[
-            "Shell",
-            "Grep",
-            "Delete",
-            "WebSearch",
-            "WebFetch",
-            "GenerateImage",
-            "ReadLints",
-            "EditNotebook",
-            "TodoWrite",
-            "StrReplace",
-            "Write",
-            "Read",
-            "Glob",
-            "GetMcpTools",
-            "FetchMcpResource",
-            "SwitchMode",
-            "UpdateCurrentStep",
-            "CallMcpTool",
-            "SembleSearch",
-            "SembleFindRelated",
-        ],
-        "6de1ee86a131ca093c7143f54fffcba2fc14b32ff45fd6f5e0df1347058ad744",
-    );
-    assert_mode(
-        &assets,
-        Mode::Compaction,
-        &[],
-        "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-    );
-    assert_eq!(
-        schema_digest(&assets.mode(Mode::Agent).tools),
-        "282a1dff7957090d0a75eac4a46474ac7cffa1b0937bdf97354544e729bb15c2"
-    );
-    let task = assets
-        .mode(Mode::Agent)
-        .tools
-        .iter()
-        .find(|tool| tool.name == "Task")
-        .unwrap();
-    assert!(task.description.contains(
-        "When the user does not specify a number, launch at most three subagents in a single response. If the user explicitly requests more, you may launch the requested number."
-    ));
-    assert!(task.description.contains(
-        "If the user explicitly requests parallel subagents, follow the number requested by the user."
-    ));
-    assert!(!task
-        .description
-        .chars()
-        .any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character)));
     let shell = assets
         .mode(Mode::Agent)
         .tools
@@ -333,19 +294,68 @@ fn every_prompt_mode_loads_the_captured_tool_set() {
             .unwrap()
             .contains("do not combine it with `nohup`, `&`, `disown`")
     );
-    for mode in [
-        Mode::Agent,
-        Mode::Ask,
-        Mode::Debug,
-        Mode::Multitask,
-        Mode::Subagent,
-        Mode::Compaction,
-    ] {
+    for (mode, _) in modes {
         assert!(!assets
             .mode(mode)
             .tools
             .iter()
-            .any(|tool| tool.name == "CreatePlan" || tool.name == "PatchEdit"));
+            .any(|tool| tool.name == "PatchEdit"));
+        assert_eq!(
+            assets
+                .mode(mode)
+                .tools
+                .iter()
+                .any(|tool| tool.name == "CreatePlan"),
+            mode == Mode::Plan
+        );
+    }
+}
+
+#[test]
+fn should_allow_client_side_document_parsing_in_every_interactive_mode() {
+    let compiler = PromptCompiler::new(PromptAssets::embedded().unwrap());
+    for mode in [
+        Mode::Agent,
+        Mode::Ask,
+        Mode::Plan,
+        Mode::Debug,
+        Mode::Multitask,
+    ] {
+        let prompt = compiler
+            .prompt_spec(mode, &ModelSpec::new("model"), &[])
+            .unwrap();
+        let shell = prompt
+            .tools
+            .iter()
+            .find(|tool| tool.name == "Shell")
+            .unwrap();
+        assert!(
+            shell.description.contains("Excel")
+                && shell.description.contains("Python")
+                && shell.description.contains("client machine"),
+            "{mode:?} must offer a client-side parser for documents Read cannot decode"
+        );
+        assert!(
+            !shell
+                .description
+                .contains("DO NOT use it for file operations"),
+            "{mode:?} must not prohibit the only available binary document parser"
+        );
+        assert!(
+            shell.description.contains("read-only")
+                && shell.description.contains("approval")
+                && shell.description.contains("dedicated tools"),
+            "{mode:?} must preserve ordinary file-tool preference and approval boundaries"
+        );
+        let read = prompt
+            .tools
+            .iter()
+            .find(|tool| tool.name == "Read")
+            .unwrap();
+        assert!(
+            read.description.contains(".xlsx") && read.description.contains("Shell"),
+            "{mode:?} must explain how to inspect unsupported spreadsheets"
+        );
     }
 }
 
@@ -374,26 +384,20 @@ fn every_captured_mode_owns_and_renders_its_runtime_template() {
         (Mode::Ask, "Ask mode is active."),
         (Mode::Plan, "Plan mode is active."),
         (Mode::Debug, "You are now in **DEBUG MODE**"),
-        (Mode::Multitask, "The user has engaged **Multitask Mode**"),
+        (Mode::Multitask, "You are still in **Multitask Mode**"),
     ] {
         let rendered = compiler.runtime_message(mode, &values).unwrap();
         assert!(rendered.contains(marker), "missing {mode:?} marker");
-        assert!(rendered.contains("<user_query>\nquestion\n</user_query>"));
+        let query = rendered
+            .split_once("<user_query>")
+            .unwrap()
+            .1
+            .split_once("</user_query>")
+            .unwrap()
+            .0;
+        assert_eq!(query.trim(), "question", "incorrect {mode:?} user query");
         assert_eq!(rendered.matches("<user_query>").count(), 1);
     }
-}
-
-fn assert_mode(assets: &PromptAssets, mode: Mode, expected: &[&str], digest: &str) {
-    assert_eq!(
-        assets
-            .mode(mode)
-            .tools
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>(),
-        expected
-    );
-    assert_eq!(schema_digest(&assets.mode(mode).tools), digest);
 }
 
 fn schema_digest(tools: &[ToolDefinition]) -> String {
@@ -410,7 +414,7 @@ fn dynamic_mcp_tools_are_appended_after_the_stable_mode_tool_prefix() {
     .unwrap();
     let compiler = PromptCompiler::new(assets);
     let base = compiler
-        .prompt_spec(Mode::Agent, &ModelSpec::new("model"), &[], false)
+        .prompt_spec(Mode::Agent, &ModelSpec::new("model"), &[])
         .unwrap();
     let dynamic = compiler
         .prompt_spec(
@@ -421,7 +425,6 @@ fn dynamic_mcp_tools_are_appended_after_the_stable_mode_tool_prefix() {
                 description: "lookup".into(),
                 parameters: serde_json::json!({"type": "object"}),
             }],
-            false,
         )
         .unwrap();
     assert_eq!(base.tools, dynamic.tools[..base.tools.len()]);
@@ -446,7 +449,6 @@ fn dynamic_mcp_tool_cannot_replace_a_mode_tool() {
                 description: "replacement".into(),
                 parameters: serde_json::json!({"type": "object"}),
             }],
-            false,
         )
         .unwrap_err();
     assert!(error
@@ -455,7 +457,7 @@ fn dynamic_mcp_tool_cannot_replace_a_mode_tool() {
 }
 
 #[test]
-fn image_generation_capability_controls_only_the_generate_image_definition() {
+fn image_generation_capability_does_not_advertise_an_unimplemented_tool() {
     let assets = PromptAssets::load(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("prompt/cursor")
@@ -464,20 +466,17 @@ fn image_generation_capability_controls_only_the_generate_image_definition() {
     .unwrap();
     let compiler = PromptCompiler::new(assets);
     let without = compiler
-        .prompt_spec(Mode::Agent, &ModelSpec::new("model"), &[], false)
+        .prompt_spec(Mode::Agent, &ModelSpec::new("model"), &[])
         .unwrap();
     let mut model = ModelSpec::new("model");
     model.supports_image_generation = true;
-    let with = compiler
-        .prompt_spec(Mode::Agent, &model, &[], false)
-        .unwrap();
+    let with = compiler.prompt_spec(Mode::Agent, &model, &[]).unwrap();
 
     assert!(!without
         .tools
         .iter()
         .any(|tool| tool.name == "GenerateImage"));
-    assert!(with.tools.iter().any(|tool| tool.name == "GenerateImage"));
-    assert_eq!(with.tools.len(), without.tools.len() + 1);
+    assert_eq!(with, without);
 }
 
 #[test]
@@ -491,9 +490,7 @@ fn agent_system_prompt_is_static_and_substitutes_the_model_name() {
     let compiler = PromptCompiler::new(assets);
     let mut model = ModelSpec::new("test-model-hash");
     model.display_name = Some("Test Model".into());
-    let request = compiler
-        .prompt_spec(Mode::Agent, &model, &[], false)
-        .unwrap();
+    let request = compiler.prompt_spec(Mode::Agent, &model, &[]).unwrap();
     let prompt = &request.instructions;
     assert!(prompt.contains("powered by Test Model"));
     assert!(!prompt.contains("test-model-hash"));
@@ -502,62 +499,8 @@ fn agent_system_prompt_is_static_and_substitutes_the_model_name() {
 }
 
 #[test]
-fn subagent_uses_the_agent_prompt_and_only_the_captured_tool_delta() {
-    let assets = PromptAssets::load(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("prompt/cursor")
-            .as_path(),
-    )
-    .unwrap();
-    let compiler = PromptCompiler::new(assets);
-    let agent_prompt = compiler
-        .prompt_spec(Mode::Agent, &ModelSpec::new("model"), &[], false)
-        .unwrap();
-    let subagent_prompt = compiler
-        .prompt_spec(Mode::Subagent, &ModelSpec::new("model"), &[], false)
-        .unwrap();
-    assert_eq!(agent_prompt.instructions, subagent_prompt.instructions);
-
-    let request = compiler
-        .prompt_spec(Mode::Subagent, &ModelSpec::new("model"), &[], false)
-        .unwrap();
-    assert_eq!(
-        request
-            .tools
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "Shell",
-            "Grep",
-            "Delete",
-            "WebSearch",
-            "WebFetch",
-            "ReadLints",
-            "EditNotebook",
-            "TodoWrite",
-            "StrReplace",
-            "Write",
-            "Read",
-            "Glob",
-            "GetMcpTools",
-            "FetchMcpResource",
-            "SwitchMode",
-            "UpdateCurrentStep",
-            "CallMcpTool",
-            "SembleSearch",
-            "SembleFindRelated",
-        ]
-    );
-    assert!(!request.tools.iter().any(|tool| tool.name == "Task"));
-
-    let suppressed = compiler
-        .prompt_spec(Mode::Subagent, &ModelSpec::new("model"), &[], true)
-        .unwrap();
-    assert!(!suppressed
-        .tools
-        .iter()
-        .any(|tool| tool.name == "UpdateCurrentStep"));
+fn should_reject_the_removed_subagent_prompt_mode() {
+    assert!(Mode::parse("subagent").is_err());
 }
 
 fn tool_result(id: &str, output: serde_json::Value) -> CanonicalMessage {

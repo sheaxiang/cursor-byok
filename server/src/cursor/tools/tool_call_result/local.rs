@@ -9,40 +9,12 @@ use crate::{
 
 use super::{now_ms, ToolCompletion};
 
-const SUBAGENTS_DISABLED_REMINDER: &str = "<system_reminder>The user has disabled the subagent model. Please remind the user to enable it in Cursor Settings → Models → Explore Subagent Model.</system_reminder>";
-
 pub(crate) fn local(call: &ToolCall, message_index: usize) -> Result<ToolCompletion> {
     match normalized(&call.name).as_str() {
         "todowrite" => todo_write(call),
         "updatecurrentstep" => update_current_step(call, message_index),
         _ => Err(Error::Protocol(format!("unsupported tool: {}", call.name))),
     }
-}
-
-pub(crate) fn subagents_disabled(call: &ToolCall) -> Result<ToolCompletion> {
-    let mut rendered = interaction::render_tool_call(call, false)?;
-    let Some(pb::tool_call::Tool::TaskToolCall(tool)) = rendered.tool.as_mut() else {
-        return Err(Error::Protocol("Task has no Cursor representation".into()));
-    };
-    tool.result = Some(pb::TaskResult {
-        result: Some(pb::task_result::Result::Error(pb::TaskError {
-            error: SUBAGENTS_DISABLED_REMINDER.into(),
-        })),
-    });
-    let tool = rendered
-        .tool
-        .ok_or_else(|| Error::Protocol("Task has no Cursor representation".into()))?;
-    Ok(ToolCompletion::new(
-        call,
-        now_ms(),
-        ToolResult {
-            call_id: call.call_id.clone(),
-            content: SUBAGENTS_DISABLED_REMINDER.into(),
-            is_error: true,
-            image: None,
-        },
-        tool,
-    ))
 }
 
 fn todo_write(call: &ToolCall) -> Result<ToolCompletion> {
